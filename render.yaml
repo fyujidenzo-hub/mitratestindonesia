@@ -1,0 +1,22 @@
+services:
+  - type: web
+    name: shopee-work
+    runtime: node
+    plan: free
+    buildCommand: npm ci && npm run db:generate && npm run build
+    preDeployCommand: npm run db:deploy
+    startCommand: npm run start -w server
+    initialDeployHook: npm run db:seed
+    healthCheckPath: /api/health
+    autoDeployTrigger: commit
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DATABASE_URL
+        sync: false
+      - key: DIRECT_URL
+        sync: false
+      - key: CLIENT_ORIGIN
+        sync: false
+      - key: JWT_SECRET
+        generateValue: true

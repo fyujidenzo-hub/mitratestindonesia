@@ -1,0 +1,218 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
+}
+
+enum UserRole {
+  CUSTOMER
+  SUPER_ADMIN
+  ADMIN
+  EMPLOYEE
+}
+
+enum UserLevel {
+  STARTER
+  SILVER
+  GOLD
+  VIP
+}
+
+enum TransactionType {
+  TOPUP
+  WITHDRAWAL
+  REWARD
+}
+
+enum TransactionStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum OrderStatus {
+  WAITING_ASSIGNMENT
+  PRODUCT_ASSIGNED
+  WAITING_SHIPMENT
+  PENDING_DELIVERY
+  DELIVERED
+  REJECTED
+}
+
+model User {
+  id                     String        @id @default(cuid())
+  username               String        @unique @db.VarChar(64)
+  displayName            String        @db.VarChar(100)
+  phone                  String?       @unique @db.VarChar(32)
+  passwordHash           String        @db.VarChar(255)
+  withdrawalPasswordHash String?       @db.VarChar(255)
+  role                   UserRole      @default(CUSTOMER)
+  level                  UserLevel     @default(STARTER)
+  balance                BigInt        @default(0)
+  totalOrders            Int           @default(0)
+  invitationCode         String?       @unique @db.VarChar(32)
+  adminCode              String?       @unique @db.VarChar(32)
+  registrationBonus      BigInt        @default(0)
+  withdrawalLocked       Boolean       @default(false)
+  withdrawalRemarks      String?       @db.Text
+  isActive               Boolean       @default(true)
+  referrerId             String?
+  createdAt              DateTime      @default(now())
+  updatedAt              DateTime      @updatedAt
+  lastLoginAt            DateTime?
+
+  referrer            User?         @relation("Referrals", fields: [referrerId], references: [id], onDelete: SetNull)
+  referrals           User[]        @relation("Referrals")
+  transactions        Transaction[] @relation("CustomerTransactions")
+  reviewedTransactions Transaction[] @relation("ReviewerTransactions")
+  orders              Order[]       @relation("CustomerOrders")
+  managedOrders       Order[]       @relation("AdminOrders")
+  orderEvents         OrderEvent[]
+  auditLogs           AuditLog[]
+
+  @@index([referrerId])
+  @@index([role, isActive])
+}
+
+model Product {
+  id              String      @id @default(cuid())
+  code            String      @unique @db.VarChar(40)
+  name            String      @db.VarChar(180)
+  description     String?     @db.Text
+  price           BigInt
+  commission      BigInt
+  requiredBalance BigInt      @default(0)
+  quantity        Int         @default(0)
+  category        String      @db.VarChar(80)
+  imageUrl        String      @db.Text
+  active          Boolean     @default(true)
+  createdAt       DateTime    @default(now())
+  updatedAt       DateTime    @updatedAt
+  orderItems      OrderItem[]
+
+  @@index([category, active])
+}
+
+model Bank {
+  id            String   @id @default(cuid())
+  bankName      String   @db.VarChar(80)
+  accountName   String   @db.VarChar(120)
+  accountNumber String   @db.VarChar(64)
+  minimumDeposit BigInt  @default(100000)
+  active        Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+}
+
+model Transaction {
+  id                      String            @id @default(cuid())
+  requestNumber           String            @unique @db.VarChar(64)
+  userId                  String
+  reviewerId              String?
+  type                    TransactionType
+  amount                  BigInt
+  status                  TransactionStatus @default(PENDING)
+  senderName              String?           @db.VarChar(120)
+  withdrawalBankName      String?           @db.VarChar(100)
+  withdrawalAccountName   String?           @db.VarChar(120)
+  withdrawalAccountNumber String?           @db.VarChar(80)
+  proofPath               String?           @db.Text
+  proofOriginalName       String?           @db.VarChar(255)
+  balanceDeductedAt       DateTime?
+  creditedAt              DateTime?
+  reviewedAt              DateTime?
+  createdAt               DateTime          @default(now())
+  updatedAt               DateTime          @updatedAt
+
+  user     User  @relation("CustomerTransactions", fields: [userId], references: [id], onDelete: Restrict)
+  reviewer User? @relation("ReviewerTransactions", fields: [reviewerId], references: [id], onDelete: SetNull)
+
+  @@index([userId, createdAt])
+  @@index([status, type, createdAt])
+}
+
+model Order {
+  id                       String      @id @default(cuid())
+  referenceNumber          String      @unique @db.VarChar(64)
+  userId                   String
+  adminId                  String?
+  status                   OrderStatus @default(WAITING_ASSIGNMENT)
+  totalValue               BigInt      @default(0)
+  commission               BigInt      @default(0)
+  requiredBalance          BigInt      @default(0)
+  requiresCustomerApproval Boolean     @default(false)
+  assignedAt               DateTime?
+  submittedAt              DateTime?
+  completedAt              DateTime?
+  commissionCreditedAt     DateTime?
+  rating                   Int?
+  review                   String?     @db.Text
+  reviewedAt               DateTime?
+  createdAt                DateTime    @default(now())
+  updatedAt                DateTime    @updatedAt
+
+  user   User       @relation("CustomerOrders", fields: [userId], references: [id], onDelete: Restrict)
+  admin  User?      @relation("AdminOrders", fields: [adminId], references: [id], onDelete: SetNull)
+  items  OrderItem[]
+  events OrderEvent[]
+
+  @@index([userId, status])
+  @@index([adminId, createdAt])
+}
+
+model OrderItem {
+  id         String  @id @default(cuid())
+  orderId    String
+  productId  String?
+  productCode String @db.VarChar(40)
+  productName String @db.VarChar(180)
+  price      BigInt
+  commission BigInt
+  quantity   Int     @default(1)
+  total      BigInt
+
+  order   Order    @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  product Product? @relation(fields: [productId], references: [id], onDelete: SetNull)
+
+  @@index([orderId])
+}
+
+model OrderEvent {
+  id        String      @id @default(cuid())
+  orderId   String
+  actorId   String?
+  fromStatus OrderStatus?
+  toStatus  OrderStatus
+  note      String?     @db.Text
+  createdAt DateTime    @default(now())
+
+  order Order @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  actor User? @relation(fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([orderId, createdAt])
+}
+
+model SiteSetting {
+  key       String   @id @db.VarChar(80)
+  value     String   @db.Text
+  updatedAt DateTime @updatedAt
+}
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  actorId    String?
+  action     String   @db.VarChar(100)
+  entityType String   @db.VarChar(80)
+  entityId   String?  @db.VarChar(191)
+  details    Json?
+  createdAt  DateTime @default(now())
+
+  actor User? @relation(fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([actorId, createdAt])
+  @@index([entityType, entityId])
+}
