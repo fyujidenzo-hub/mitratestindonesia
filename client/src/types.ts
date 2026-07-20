@@ -1,4 +1,5 @@
 export type UserRole = "CUSTOMER" | "SUPER_ADMIN" | "ADMIN" | "EMPLOYEE";
+export type UserLevel = "STARTER" | "SILVER" | "GOLD" | "VIP";
 export type OrderStatus = "WAITING_ASSIGNMENT" | "PRODUCT_ASSIGNED" | "WAITING_SHIPMENT" | "PENDING_DELIVERY" | "DELIVERED" | "REJECTED";
 export type TransactionStatus = "PENDING" | "APPROVED" | "REJECTED";
 export type TransactionType = "TOPUP" | "WITHDRAWAL" | "REWARD";
@@ -9,7 +10,7 @@ export type User = {
   displayName: string;
   phone?: string;
   role: UserRole;
-  level: string;
+  level: UserLevel;
   balance: number;
   totalOrders: number;
   invitationCode?: string;
@@ -17,7 +18,10 @@ export type User = {
   registrationBonus: number;
   withdrawalLocked: boolean;
   withdrawalRemarks?: string;
-  referrer?: { id?: string; displayName: string };
+  isActive?: boolean;
+  createdAt?: string;
+  lastLoginAt?: string;
+  referrer?: { id?: string; displayName: string; invitationCode?: string };
 };
 
 export type Product = {
@@ -47,6 +51,16 @@ export type CatalogProduct = {
   active: boolean;
 };
 
+export type CatalogBanner = {
+  id: string;
+  code: string;
+  title: string;
+  altText: string;
+  imageUrl: string;
+  sortOrder: number;
+  active: boolean;
+};
+
 export type Bank = {
   id: string;
   bankName: string;
@@ -64,6 +78,7 @@ export type Transaction = {
   amount: number;
   status: TransactionStatus;
   senderName?: string;
+  proofOriginalName?: string;
   withdrawalBankName?: string;
   withdrawalAccountName?: string;
   withdrawalAccountNumber?: string;
@@ -105,6 +120,7 @@ export type Order = {
 
 export type BootstrapData = {
   catalogProducts: CatalogProduct[];
+  catalogBanners: CatalogBanner[];
   banks: Bank[];
   settings: Record<string, string>;
 };

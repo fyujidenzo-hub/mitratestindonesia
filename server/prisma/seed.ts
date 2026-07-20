@@ -70,10 +70,27 @@ async function main() {
       name: product.name,
       price: product.price,
       category: product.category,
-      imageUrl: product.imageUrl,
+      imageUrl: product.code === "SHP-FOD-06" ? "/assets/catalog-banners/08-belanja-instant-enhanced.jpg" : product.imageUrl,
       active: true,
     };
     await prisma.catalogProduct.upsert({ where: { code: product.code }, update: {}, create: catalogProduct });
+  }
+
+  const catalogBanners = [
+    { code: "BANNER-001", title: "Say It With Love", altText: "Shopee Say It With Love promotion", imageUrl: "/assets/catalog-banners/09-say-it-with-love-enhanced.jpg", sortOrder: 1 },
+    { code: "BANNER-002", title: "SPayLater", altText: "Shopee SPayLater installment promotion", imageUrl: "/assets/catalog-banners/10-spaylater-enhanced.jpg", sortOrder: 2 },
+    { code: "BANNER-003", title: "SPinjam Fest", altText: "Shopee SPinjam Fest promotion", imageUrl: "/assets/catalog-banners/11-spinjam-fest-enhanced.jpg", sortOrder: 3 },
+    { code: "BANNER-004", title: "Hisense Super Brand Day", altText: "Hisense Super Brand Day promotion", imageUrl: "/assets/catalog-banners/01-hisense-enhanced.jpg", sortOrder: 4 },
+    { code: "BANNER-005", title: "Baseus Brand Day", altText: "Baseus Brand Day promotion", imageUrl: "/assets/catalog-banners/02-baseus-enhanced.jpg", sortOrder: 5 },
+    { code: "BANNER-006", title: "Puma Super Brand Day", altText: "Puma Super Brand Day promotion", imageUrl: "/assets/catalog-banners/03-puma-enhanced.jpg", sortOrder: 6 },
+    { code: "BANNER-007", title: "Beauty Brand Day", altText: "Olay, Pantene, and Downy Brand Day promotion", imageUrl: "/assets/catalog-banners/04-olay-pantene-downy-enhanced.jpg", sortOrder: 7 },
+    { code: "BANNER-008", title: "Great Mid-Year Sale", altText: "Shopee 7.7 Great Mid-Year Sale promotion in orange", imageUrl: "/assets/catalog-banners/05-sale-orange-enhanced.jpg", sortOrder: 8 },
+    { code: "BANNER-009", title: "Midnight Sale", altText: "Shopee 7.7 Great Mid-Year Sale promotion in blue", imageUrl: "/assets/catalog-banners/06-sale-blue-enhanced.jpg", sortOrder: 9 },
+    { code: "BANNER-010", title: "Adidas Super Brand Day", altText: "Adidas Super Brand Day promotion", imageUrl: "/assets/catalog-banners/07-adidas-enhanced.jpg", sortOrder: 10 },
+    { code: "BANNER-011", title: "Belanja Instant", altText: "Shopee instant shopping promotion", imageUrl: "/assets/catalog-banners/08-belanja-instant-enhanced.jpg", sortOrder: 11 },
+  ];
+  for (const banner of catalogBanners) {
+    await prisma.catalogBanner.upsert({ where: { code: banner.code }, update: {}, create: { ...banner, active: true } });
   }
 
   if ((await prisma.bank.count()) === 0) {

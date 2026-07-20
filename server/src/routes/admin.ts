@@ -1,13 +1,14 @@
 import { Router } from "express";
 import path from "node:path";
-import { OrderStatus, TransactionStatus, TransactionType, UserRole } from "@prisma/client";
+import bcrypt from "bcryptjs";
+import { OrderStatus, TransactionStatus, TransactionType, UserLevel, UserRole } from "@prisma/client";
 import { z } from "zod";
 import { authenticateAdmin, type AuthRequest, requireRole } from "../middleware/auth.js";
 import { prisma } from "../lib/prisma.js";
 import { asyncHandler, HttpError, jsonSafe, requestNumber } from "../lib/http.js";
 
 const router = Router();
-const staffRoles = [UserRole.SUPER_ADMIN, UserRole.ADMIN, UserRole.EMPLOYEE];
+const staffRoles: UserRole[] = [UserRole.SUPER_ADMIN, UserRole.ADMIN, UserRole.EMPLOYEE];
 
 const catalogProductInputSchema = z.object({
   code: z.string().trim().min(2).max(40).regex(/^[a-zA-Z0-9._-]+$/, "Use letters, numbers, dots, dashes, or underscores only.").transform((value) => value.toUpperCase()),
@@ -15,11 +16,75 @@ const catalogProductInputSchema = z.object({
   description: z.string().trim().max(5000).optional().default(""),
   price: z.number().int().positive().max(1_000_000_000_000),
   category: z.string().trim().min(2).max(80),
-  imageUrl: z.string().trim().url().max(2000).refine((value) => value.startsWith("https://"), "Use a secure https:// image URL."),
+  imageUrl: z.string().trim().max(2000).refine((value) => value.startsWith("https://") || value.startsWith("/assets/"), "Use a secure https:// URL or a local /assets/ path."),
   active: z.boolean(),
 });
 
+const catalogBannerInputSchema = z.object({
+  code: z.string().trim().min(2).max(40).regex(/^[a-zA-Z0-9._-]+$/, "Use letters, numbers, dots, dashes, or underscores only.").transform((value) => value.toUpperCase()),
+  title: z.string().trim().min(2).max(160),
+  altText: z.string().trim().min(2).max(240),
+  imageUrl: z.string().trim().max(2000).refine((value) => value.startsWith("https://") || value.startsWith("/assets/"), "Use a secure https:// URL or a local /assets/ path."),
+  sortOrder: z.number().int().min(0).max(10_000),
+  active: z.boolean(),
+});
+
+const staffRoleSchema = z.enum([UserRole.ADMIN, UserRole.EMPLOYEE]);
+const optionalPhoneSchema = z.union([z.string().trim().min(8).max(32), z.literal("")]).optional().transform((value) => value || undefined);
+const staffBaseInputSchema = z.object({
+  username: z.string().trim().min(3).max(64).regex(/^[a-zA-Z0-9._-]+$/, "Use letters, numbers, dots, dashes, or underscores only.").transform((value) => value.toLowerCase()),
+  displayName: z.string().trim().min(2).max(100),
+  phone: optionalPhoneSchema,
+  role: staffRoleSchema,
+  adminCode: z.string().trim().min(4).max(32).regex(/^[a-zA-Z0-9._-]+$/, "Use letters, numbers, dots, dashes, or underscores only.").transform((value) => value.toUpperCase()),
+  invitationCode: z.string().trim().min(4).max(32).regex(/^[a-zA-Z0-9._-]+$/, "Use letters, numbers, dots, dashes, or underscores only.").transform((value) => value.toUpperCase()),
+  registrationBonus: z.number().int().min(0).max(1_000_000_000),
+});
+const createStaffInputSchema = staffBaseInputSchema.extend({ password: z.string().min(8).max(100) });
+const updateStaffInputSchema = staffBaseInputSchema.extend({ password: z.union([z.string().min(8).max(100), z.literal("")]).optional() });
+const staffSelect = {
+  id: true,
+  username: true,
+  displayName: true,
+  phone: true,
+  role: true,
+  invitationCode: true,
+  adminCode: true,
+  registrationBonus: true,
+  isActive: true,
+  createdAt: true,
+  lastLoginAt: true,
+} as const;
+
+async function ensureStaffIdentifiersAvailable(input: { username: string; phone?: string; adminCode: string; invitationCode: string }, excludeId?: string) {
+  const existing = await prisma.user.findFirst({
+    where: {
+      ...(excludeId ? { id: { not: excludeId } } : {}),
+      OR: [
+        { username: input.username },
+        ...(input.phone ? [{ phone: input.phone }] : []),
+        { adminCode: input.adminCode },
+        { invitationCode: input.invitationCode },
+      ],
+    },
+    select: { username: true, phone: true, adminCode: true, invitationCode: true },
+  });
+  if (!existing) return;
+  if (existing.username === input.username) throw new HttpError(409, "That username is already in use.");
+  if (input.phone && existing.phone === input.phone) throw new HttpError(409, "That phone number is already in use.");
+  if (existing.adminCode === input.adminCode) throw new HttpError(409, "That admin code is already in use.");
+  throw new HttpError(409, "That invitation code is already in use.");
+}
+
 router.use(authenticateAdmin, requireRole(...staffRoles));
+router.use(asyncHandler(async (request: AuthRequest, _response, next) => {
+  const activeStaff = await prisma.user.findFirst({
+    where: { id: request.auth!.id, role: { in: staffRoles }, isActive: true },
+    select: { id: true },
+  });
+  if (!activeStaff) throw new HttpError(401, "This administrator account has been deactivated.");
+  next();
+}));
 
 router.get(
   "/overview",
@@ -31,18 +96,123 @@ router.get(
     const transactionFilter = scopedUserIds ? { userId: { in: scopedUserIds } } : {};
     const orderFilter = scopedUserIds ? { userId: { in: scopedUserIds } } : {};
 
-    const [members, transactions, orders, taskProducts, catalogProducts, banks, staff] = await Promise.all([
-      prisma.user.findMany({ where: userFilter, select: { id: true, username: true, displayName: true, phone: true, balance: true, level: true, totalOrders: true, withdrawalLocked: true, withdrawalRemarks: true, createdAt: true, referrer: { select: { displayName: true } } }, orderBy: { createdAt: "desc" } }),
+    const [members, transactions, orders, taskProducts, catalogProducts, catalogBanners, banks, staff] = await Promise.all([
+      prisma.user.findMany({ where: userFilter, select: { id: true, username: true, displayName: true, phone: true, balance: true, level: true, totalOrders: true, withdrawalLocked: true, withdrawalRemarks: true, isActive: true, createdAt: true, lastLoginAt: true, referrer: { select: { displayName: true, invitationCode: true } } }, orderBy: { createdAt: "desc" } }),
       prisma.transaction.findMany({ where: transactionFilter, include: { user: { select: { username: true, displayName: true } }, reviewer: { select: { displayName: true } } }, orderBy: { createdAt: "desc" }, take: 200 }),
       prisma.order.findMany({ where: orderFilter, include: { user: { select: { username: true, displayName: true, balance: true } }, items: true }, orderBy: { createdAt: "desc" }, take: 200 }),
       prisma.product.findMany({ orderBy: { createdAt: "desc" } }),
       prisma.catalogProduct.findMany({ orderBy: [{ price: "asc" }, { name: "asc" }] }),
+      prisma.catalogBanner.findMany({ orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }] }),
       prisma.bank.findMany({ orderBy: { createdAt: "desc" } }),
       request.auth!.role === UserRole.SUPER_ADMIN
-        ? prisma.user.findMany({ where: { role: { in: staffRoles } }, select: { id: true, username: true, displayName: true, role: true, invitationCode: true, adminCode: true, registrationBonus: true, isActive: true } })
+        ? prisma.user.findMany({ where: { role: { in: staffRoles } }, select: staffSelect, orderBy: [{ isActive: "desc" }, { createdAt: "asc" }] })
         : Promise.resolve([]),
     ]);
-    response.json(jsonSafe({ members, transactions, orders, taskProducts, catalogProducts, banks, staff }));
+    response.json(jsonSafe({ members, transactions, orders, taskProducts, catalogProducts, catalogBanners, banks, staff }));
+  }),
+);
+
+router.post(
+  "/staff",
+  requireRole(UserRole.SUPER_ADMIN),
+  asyncHandler(async (request: AuthRequest, response) => {
+    const input = createStaffInputSchema.parse(request.body);
+    await ensureStaffIdentifiersAvailable(input);
+    const passwordHash = await bcrypt.hash(input.password, 12);
+    const staff = await prisma.$transaction(async (database) => {
+      const created = await database.user.create({
+        data: {
+          username: input.username,
+          displayName: input.displayName,
+          phone: input.phone,
+          passwordHash,
+          role: input.role,
+          adminCode: input.adminCode,
+          invitationCode: input.invitationCode,
+          registrationBonus: BigInt(input.registrationBonus),
+          isActive: true,
+        },
+        select: staffSelect,
+      });
+      await database.auditLog.create({
+        data: {
+          actorId: request.auth!.id,
+          action: "STAFF_CREATED",
+          entityType: "User",
+          entityId: created.id,
+          details: { username: created.username, role: created.role, adminCode: created.adminCode },
+        },
+      });
+      return created;
+    });
+    response.status(201).json(jsonSafe({ staff }));
+  }),
+);
+
+router.patch(
+  "/staff/:id",
+  requireRole(UserRole.SUPER_ADMIN),
+  asyncHandler(async (request: AuthRequest, response) => {
+    const staffId = String(request.params.id);
+    const input = updateStaffInputSchema.parse(request.body);
+    const existing = await prisma.user.findUnique({ where: { id: staffId }, select: { id: true, role: true, username: true } });
+    if (!existing || !staffRoles.includes(existing.role)) throw new HttpError(404, "Administrator account not found.");
+    if (existing.role === UserRole.SUPER_ADMIN) throw new HttpError(403, "The Super Admin account is protected and cannot be edited here.");
+    await ensureStaffIdentifiersAvailable(input, staffId);
+    const passwordHash = input.password ? await bcrypt.hash(input.password, 12) : undefined;
+    const staff = await prisma.$transaction(async (database) => {
+      const updated = await database.user.update({
+        where: { id: staffId },
+        data: {
+          username: input.username,
+          displayName: input.displayName,
+          phone: input.phone || null,
+          role: input.role,
+          adminCode: input.adminCode,
+          invitationCode: input.invitationCode,
+          registrationBonus: BigInt(input.registrationBonus),
+          ...(passwordHash ? { passwordHash } : {}),
+        },
+        select: staffSelect,
+      });
+      await database.auditLog.create({
+        data: {
+          actorId: request.auth!.id,
+          action: "STAFF_UPDATED",
+          entityType: "User",
+          entityId: updated.id,
+          details: { username: updated.username, previousUsername: existing.username, role: updated.role, passwordChanged: Boolean(passwordHash) },
+        },
+      });
+      return updated;
+    });
+    response.json(jsonSafe({ staff }));
+  }),
+);
+
+router.patch(
+  "/staff/:id/status",
+  requireRole(UserRole.SUPER_ADMIN),
+  asyncHandler(async (request: AuthRequest, response) => {
+    const staffId = String(request.params.id);
+    const { active } = z.object({ active: z.boolean() }).parse(request.body);
+    const existing = await prisma.user.findUnique({ where: { id: staffId }, select: { id: true, role: true, username: true, isActive: true } });
+    if (!existing || !staffRoles.includes(existing.role)) throw new HttpError(404, "Administrator account not found.");
+    if (existing.role === UserRole.SUPER_ADMIN) throw new HttpError(403, "The Super Admin account cannot be deactivated.");
+    const staff = await prisma.$transaction(async (database) => {
+      const updated = await database.user.update({ where: { id: staffId }, data: { isActive: active }, select: staffSelect });
+      await database.auditLog.create({
+        data: {
+          actorId: request.auth!.id,
+          action: active ? "STAFF_REACTIVATED" : "STAFF_DEACTIVATED",
+          entityType: "User",
+          entityId: staffId,
+          details: { username: existing.username, previousStatus: existing.isActive },
+        },
+      });
+      return updated;
+    });
+    response.json(jsonSafe({ staff }));
   }),
 );
 
@@ -139,6 +309,32 @@ router.post(
 );
 
 router.patch(
+  "/members/:id/access",
+  requireRole(UserRole.SUPER_ADMIN),
+  asyncHandler(async (request: AuthRequest, response) => {
+    const input = z.object({ level: z.enum(UserLevel), active: z.boolean() }).parse(request.body);
+    const memberId = String(request.params.id);
+    const existing = await prisma.user.findFirst({ where: { id: memberId, role: UserRole.CUSTOMER }, select: { id: true, username: true, level: true, isActive: true } });
+    if (!existing) throw new HttpError(404, "Member account not found.");
+
+    const member = await prisma.$transaction(async (database) => {
+      const updated = await database.user.update({ where: { id: memberId }, data: { level: input.level, isActive: input.active } });
+      await database.auditLog.create({
+        data: {
+          actorId: request.auth!.id,
+          action: "MEMBER_ACCESS_UPDATED",
+          entityType: "User",
+          entityId: memberId,
+          details: { username: existing.username, previousLevel: existing.level, level: input.level, previousActive: existing.isActive, active: input.active },
+        },
+      });
+      return updated;
+    });
+    response.json(jsonSafe({ member }));
+  }),
+);
+
+router.patch(
   "/members/:id/withdrawal-lock",
   requireRole(UserRole.SUPER_ADMIN),
   asyncHandler(async (request, response) => {
@@ -224,6 +420,74 @@ router.delete(
           entityType: "CatalogProduct",
           entityId: existing.id,
           details: { code: existing.code, name: existing.name },
+        },
+      });
+    });
+    response.status(204).end();
+  }),
+);
+
+router.post(
+  "/catalog-banners",
+  requireRole(UserRole.SUPER_ADMIN),
+  asyncHandler(async (request: AuthRequest, response) => {
+    const input = catalogBannerInputSchema.parse(request.body);
+    const banner = await prisma.$transaction(async (database) => {
+      const created = await database.catalogBanner.create({ data: input });
+      await database.auditLog.create({
+        data: {
+          actorId: request.auth!.id,
+          action: "CATALOG_BANNER_CREATED",
+          entityType: "CatalogBanner",
+          entityId: created.id,
+          details: { code: created.code, title: created.title },
+        },
+      });
+      return created;
+    });
+    response.status(201).json(jsonSafe({ banner }));
+  }),
+);
+
+router.patch(
+  "/catalog-banners/:id",
+  requireRole(UserRole.SUPER_ADMIN),
+  asyncHandler(async (request: AuthRequest, response) => {
+    const input = catalogBannerInputSchema.parse(request.body);
+    const existing = await prisma.catalogBanner.findUnique({ where: { id: String(request.params.id) } });
+    if (!existing) throw new HttpError(404, "Catalog banner not found.");
+    const banner = await prisma.$transaction(async (database) => {
+      const updated = await database.catalogBanner.update({ where: { id: existing.id }, data: input });
+      await database.auditLog.create({
+        data: {
+          actorId: request.auth!.id,
+          action: "CATALOG_BANNER_UPDATED",
+          entityType: "CatalogBanner",
+          entityId: updated.id,
+          details: { code: updated.code, title: updated.title, previousCode: existing.code },
+        },
+      });
+      return updated;
+    });
+    response.json(jsonSafe({ banner }));
+  }),
+);
+
+router.delete(
+  "/catalog-banners/:id",
+  requireRole(UserRole.SUPER_ADMIN),
+  asyncHandler(async (request: AuthRequest, response) => {
+    const existing = await prisma.catalogBanner.findUnique({ where: { id: String(request.params.id) } });
+    if (!existing) throw new HttpError(404, "Catalog banner not found.");
+    await prisma.$transaction(async (database) => {
+      await database.catalogBanner.delete({ where: { id: existing.id } });
+      await database.auditLog.create({
+        data: {
+          actorId: request.auth!.id,
+          action: "CATALOG_BANNER_DELETED",
+          entityType: "CatalogBanner",
+          entityId: existing.id,
+          details: { code: existing.code, title: existing.title },
         },
       });
     });

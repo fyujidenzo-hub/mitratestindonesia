@@ -115,6 +115,22 @@ model CatalogProduct {
   @@index([active, price])
 }
 
+// Promotional artwork shown in the customer carousel. Banners are independent
+// of both catalog products and task orders.
+model CatalogBanner {
+  id        String   @id @default(cuid())
+  code      String   @unique @db.VarChar(40)
+  title     String   @db.VarChar(160)
+  altText   String   @db.VarChar(240)
+  imageUrl  String   @db.Text
+  sortOrder Int      @default(0)
+  active    Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([active, sortOrder])
+}
+
 model Bank {
   id            String   @id @default(cuid())
   bankName      String   @db.VarChar(80)

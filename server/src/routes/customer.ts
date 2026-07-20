@@ -14,6 +14,11 @@ const activeStatuses = [OrderStatus.WAITING_ASSIGNMENT, OrderStatus.PRODUCT_ASSI
 const securityLimiter = rateLimit({ windowMs: 15 * 60_000, limit: 5, standardHeaders: "draft-8", legacyHeaders: false });
 
 router.use(authenticateCustomer);
+router.use(asyncHandler(async (request: AuthRequest, _response, next) => {
+  const activeCustomer = await prisma.user.findFirst({ where: { id: request.auth!.id, role: UserRole.CUSTOMER, isActive: true }, select: { id: true } });
+  if (!activeCustomer) throw new HttpError(401, "This member account has been deactivated.");
+  next();
+}));
 
 const upload = multer({
   storage: multer.diskStorage({

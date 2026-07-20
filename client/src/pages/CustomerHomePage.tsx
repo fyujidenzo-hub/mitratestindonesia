@@ -54,8 +54,6 @@ export default function CustomerHomePage() {
     .slice()
     .sort((left, right) => left.price - right.price || left.name.localeCompare(right.name))
     .slice(0, 6), [bootstrap?.catalogProducts]);
-  const featuredProduct = catalogProducts[0];
-  const shelfProducts = catalogProducts.slice(1);
 
   return (
     <CustomerShell>
@@ -122,20 +120,13 @@ export default function CustomerHomePage() {
 
         <section className="mt-5 overflow-hidden rounded-[32px] border border-[#f7dcc8] bg-[#fff8f2] p-5 shadow-card sm:p-7">
           <div className="flex flex-wrap items-end justify-between gap-4">
-            <div><div className="flex items-center gap-2"><span className="grid h-9 w-9 place-items-center rounded-xl bg-white text-shopee-500 shadow-sm"><ShoppingBag size={18} /></span><p className="text-[10px] font-black uppercase tracking-[.18em] text-shopee-500">Shop window · Display only</p></div><h2 className="mt-3 text-2xl font-black tracking-tight text-slate-900">A little inspiration for today</h2><p className="mt-1 text-sm font-semibold text-slate-500">Browse-only picks shown from lowest to highest price. These never become Task Orders.</p></div>
+            <div><div className="flex items-center gap-2"><span className="grid h-9 w-9 place-items-center rounded-xl bg-white text-shopee-500 shadow-sm"><ShoppingBag size={18} /></span><p className="text-[10px] font-black uppercase tracking-[.18em] text-shopee-500">Product gallery</p></div><h2 className="mt-3 text-2xl font-black tracking-tight text-slate-900">A little inspiration for today</h2></div>
             <Link to="/task-center#catalog" className="inline-flex items-center gap-2 rounded-2xl bg-slate-950 px-4 py-3 text-xs font-black text-white">View full catalog <ArrowRight size={15} /></Link>
           </div>
 
-          {catalogLoading ? <div className="mt-6 grid gap-4 lg:grid-cols-[1.05fr_1fr]"><div className="h-72 animate-pulse rounded-[28px] bg-orange-100" /><div className="grid gap-3 sm:grid-cols-2">{Array.from({ length: 4 }).map((_, index) => <div key={index} className="h-32 animate-pulse rounded-3xl bg-white" />)}</div></div> : featuredProduct ? <div className="mt-6 grid gap-4 lg:grid-cols-[1.05fr_1fr]">
-            <article className="relative min-h-[310px] overflow-hidden rounded-[28px] bg-slate-950 text-white">
-              <img src={featuredProduct.imageUrl} alt={featuredProduct.name} className="absolute inset-0 h-full w-full object-cover opacity-75" />
-              <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-slate-950/30 to-transparent" />
-              <div className="relative flex min-h-[310px] flex-col justify-end p-6 sm:p-7"><span className="w-fit rounded-full border border-white/20 bg-white/15 px-3 py-1.5 text-[10px] font-black uppercase tracking-wide backdrop-blur">Lowest-priced pick · {featuredProduct.category}</span><h3 className="mt-3 max-w-md text-2xl font-black tracking-tight sm:text-3xl">{featuredProduct.name}</h3><p className="mt-2 text-2xl font-black text-orange-300">{money(featuredProduct.price)}</p></div>
-            </article>
-            <div className="flex snap-x gap-3 overflow-x-auto pb-2 lg:grid lg:grid-cols-2 lg:overflow-visible lg:pb-0">
-              {shelfProducts.map((product) => <article key={product.id} className="flex min-w-[78vw] snap-center gap-3 rounded-[24px] border border-white bg-white p-3 shadow-sm sm:min-w-[320px] lg:min-w-0"><img src={product.imageUrl} alt={product.name} className="h-24 w-24 shrink-0 rounded-[18px] object-cover" /><div className="min-w-0 self-center"><p className="text-[9px] font-black uppercase tracking-wide text-shopee-500">{product.category}</p><h3 className="mt-1 line-clamp-2 text-sm font-black leading-5 text-slate-900">{product.name}</h3><p className="mt-2 text-sm font-black text-shopee-500">{money(product.price)}</p></div></article>)}
-            </div>
-          </div> : <div className="mt-6 rounded-[28px] border border-dashed border-orange-200 bg-white/60 p-8 text-center"><p className="font-black text-slate-900">The display catalog is being prepared.</p><p className="mt-1 text-sm font-semibold text-slate-400">New storefront items will appear here without affecting Task Orders.</p></div>}
+          {catalogLoading ? <div className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">{Array.from({ length: 6 }).map((_, index) => <div key={index} className="aspect-[4/3] animate-pulse rounded-[24px] bg-orange-100" />)}</div> : catalogProducts.length ? <div className="mt-6 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+            {catalogProducts.map((product, index) => <figure key={product.id} className={`group overflow-hidden rounded-[24px] bg-slate-100 shadow-sm ${index === 0 ? "col-span-2 row-span-2" : ""}`}><img src={product.imageUrl} alt={product.name} loading="lazy" onError={(event) => { event.currentTarget.onerror = null; event.currentTarget.src = "/assets/catalog-banners/08-belanja-instant-enhanced.jpg"; }} className="aspect-[4/3] h-full w-full object-cover transition duration-500 group-hover:scale-105" /></figure>)}
+          </div> : <div className="mt-6 rounded-[28px] border border-dashed border-orange-200 bg-white/60 p-8 text-center"><p className="font-black text-slate-900">The product gallery is being prepared.</p></div>}
         </section>
 
         <Link to="/task-center" className="group relative mt-5 block min-h-[150px] overflow-hidden rounded-[28px] border border-orange-100 bg-white shadow-card sm:min-h-[190px]">
