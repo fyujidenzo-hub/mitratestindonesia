@@ -4,12 +4,14 @@ import multer from "multer";
 import path from "node:path";
 import { z } from "zod";
 import { OrderStatus, TransactionStatus, TransactionType } from "@prisma/client";
-import { authenticate, type AuthRequest } from "../middleware/auth.js";
+import { authenticateCustomer, type AuthRequest } from "../middleware/auth.js";
 import { prisma } from "../lib/prisma.js";
 import { asyncHandler, HttpError, jsonSafe, requestNumber } from "../lib/http.js";
 
 const router = Router();
 const activeStatuses = [OrderStatus.WAITING_ASSIGNMENT, OrderStatus.PRODUCT_ASSIGNED, OrderStatus.WAITING_SHIPMENT, OrderStatus.PENDING_DELIVERY];
+
+router.use(authenticateCustomer);
 
 const upload = multer({
   storage: multer.diskStorage({
@@ -22,8 +24,6 @@ const upload = multer({
   limits: { fileSize: 5 * 1024 * 1024 },
   fileFilter: (_request, file, callback) => callback(null, file.mimetype.startsWith("image/")),
 });
-
-router.use(authenticate);
 
 router.get(
   "/overview",

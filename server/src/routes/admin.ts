@@ -2,14 +2,14 @@ import { Router } from "express";
 import path from "node:path";
 import { OrderStatus, TransactionStatus, TransactionType, UserRole } from "@prisma/client";
 import { z } from "zod";
-import { authenticate, type AuthRequest, requireRole } from "../middleware/auth.js";
+import { authenticateAdmin, type AuthRequest, requireRole } from "../middleware/auth.js";
 import { prisma } from "../lib/prisma.js";
 import { asyncHandler, HttpError, jsonSafe, requestNumber } from "../lib/http.js";
 
 const router = Router();
 const staffRoles = [UserRole.SUPER_ADMIN, UserRole.ADMIN, UserRole.EMPLOYEE];
 
-router.use(authenticate, requireRole(...staffRoles));
+router.use(authenticateAdmin, requireRole(...staffRoles));
 
 router.get(
   "/overview",

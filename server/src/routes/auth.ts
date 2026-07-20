@@ -1,10 +1,16 @@
-import { Router, type Response } from "express";
+import { Router, type NextFunction, type Response } from "express";
 import bcrypt from "bcryptjs";
 import { z } from "zod";
 import { UserRole } from "@prisma/client";
 import { prisma } from "../lib/prisma.js";
 import { asyncHandler, HttpError, jsonSafe } from "../lib/http.js";
-import { authenticate, createSessionToken, type AuthRequest, SESSION_COOKIE } from "../middleware/auth.js";
+import {
+  authenticateSession,
+  createSessionToken,
+  type AuthRequest,
+  type SessionArea,
+  SESSION_COOKIES,
+} from "../middleware/auth.js";
 
 const router = Router();
 
@@ -23,19 +29,34 @@ const registerSchema = z.object({
   withdrawalPassword: z.string().min(4).max(32),
 });
 
+const sessionAreaSchema = z.enum(["customer", "admin"]);
+const logoutSchema = z.object({ area: sessionAreaSchema.default("customer") });
+
 function publicUser(user: Record<string, unknown>) {
   const { passwordHash: _passwordHash, withdrawalPasswordHash: _withdrawalPasswordHash, ...safe } = user;
   return jsonSafe(safe);
 }
 
-function setSession(response: Response, id: string, role: UserRole) {
-  response.cookie(SESSION_COOKIE, createSessionToken({ id, role }), {
-    httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
-    sameSite: "lax",
+const sessionCookieOptions = {
+  httpOnly: true,
+  secure: process.env.NODE_ENV === "production",
+  sameSite: "lax" as const,
+  path: "/",
+};
+
+function setSession(response: Response, area: SessionArea, id: string, role: UserRole) {
+  response.cookie(SESSION_COOKIES[area], createSessionToken({ id, role }), {
+    ...sessionCookieOptions,
     maxAge: 7 * 24 * 60 * 60 * 1000,
-    path: "/",
   });
+
+  // Remove the legacy shared cookie so it can no longer confuse older sessions.
+  response.clearCookie("shopee-work-session", sessionCookieOptions);
+}
+
+function authenticateRequestedArea(request: AuthRequest, response: Response, next: NextFunction) {
+  const area = sessionAreaSchema.parse(request.query.area ?? "customer");
+  return authenticateSession(area)(request, response, next);
 }
 
 router.post(
@@ -61,7 +82,7 @@ router.post(
     }
 
     await prisma.user.update({ where: { id: user.id }, data: { lastLoginAt: new Date() } });
-    setSession(response, user.id, user.role);
+    setSession(response, input.area, user.id, user.role);
     response.json({ user: publicUser(user) });
   }),
 );
@@ -103,14 +124,14 @@ router.post(
       include: { referrer: { select: { id: true, displayName: true } } },
     });
 
-    setSession(response, user.id, user.role);
+    setSession(response, "customer", user.id, user.role);
     response.status(201).json({ user: publicUser(user) });
   }),
 );
 
 router.get(
   "/me",
-  authenticate,
+  authenticateRequestedArea,
   asyncHandler(async (request: AuthRequest, response) => {
     const user = await prisma.user.findUnique({
       where: { id: request.auth!.id },
@@ -121,8 +142,10 @@ router.get(
   }),
 );
 
-router.post("/logout", (_request, response) => {
-  response.clearCookie(SESSION_COOKIE, { path: "/" });
+router.post("/logout", (request, response) => {
+  const { area } = logoutSchema.parse(request.body ?? {});
+  response.clearCookie(SESSION_COOKIES[area], sessionCookieOptions);
+  response.clearCookie("shopee-work-session", sessionCookieOptions);
   response.status(204).end();
 });
 

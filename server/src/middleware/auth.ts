@@ -1,9 +1,14 @@
 import type { NextFunction, Request, Response } from "express";
 import jwt from "jsonwebtoken";
-import type { UserRole } from "@prisma/client";
+import { UserRole } from "@prisma/client";
 import { HttpError } from "../lib/http.js";
 
-export const SESSION_COOKIE = "shopee-work-session";
+export type SessionArea = "customer" | "admin";
+
+export const SESSION_COOKIES: Record<SessionArea, string> = {
+  customer: "shopee-work-customer-session",
+  admin: "shopee-work-admin-session",
+};
 
 export type AuthClaims = {
   id: string;
@@ -24,17 +29,29 @@ export function createSessionToken(claims: AuthClaims) {
   return jwt.sign(claims, secret(), { expiresIn: "7d", issuer: "shopee-work-api" });
 }
 
-export function authenticate(request: AuthRequest, _response: Response, next: NextFunction) {
-  const token = request.cookies?.[SESSION_COOKIE];
-  if (!token) return next(new HttpError(401, "Please sign in first."));
+export function authenticateSession(area: SessionArea) {
+  return (request: AuthRequest, _response: Response, next: NextFunction) => {
+    const token = request.cookies?.[SESSION_COOKIES[area]];
+    if (!token) return next(new HttpError(401, "Please sign in first."));
 
-  try {
-    request.auth = jwt.verify(token, secret(), { issuer: "shopee-work-api" }) as AuthClaims;
-    next();
-  } catch {
-    next(new HttpError(401, "Your session has expired. Please sign in again."));
-  }
+    try {
+      const claims = jwt.verify(token, secret(), { issuer: "shopee-work-api" }) as AuthClaims;
+      const hasCorrectRole = area === "customer"
+        ? claims.role === UserRole.CUSTOMER
+        : claims.role !== UserRole.CUSTOMER;
+
+      if (!hasCorrectRole) return next(new HttpError(401, "Please sign in to the correct account area."));
+      request.auth = claims;
+      next();
+    } catch (error) {
+      if (error instanceof HttpError) return next(error);
+      next(new HttpError(401, "Your session has expired. Please sign in again."));
+    }
+  };
 }
+
+export const authenticateCustomer = authenticateSession("customer");
+export const authenticateAdmin = authenticateSession("admin");
 
 export function requireRole(...roles: UserRole[]) {
   return (request: AuthRequest, _response: Response, next: NextFunction) => {
