@@ -1,4 +1,4 @@
-import { ArrowRight, BadgePercent, CheckCircle2, ClipboardCheck, Coins, Heart, PackageCheck, Sparkles, Star, Target, WalletCards, Zap } from "lucide-react";
+import { ArrowRight, CheckCircle2, ClipboardCheck, Coins, Heart, PackageCheck, Sparkles, Star, Target, WalletCards, Zap } from "lucide-react";
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { CustomerShell } from "../components/CustomerShell";
@@ -22,7 +22,9 @@ export default function TaskCenterPage() {
   const loadOverview = () => api<Overview>("/customer/overview").then(setOverview);
   useEffect(() => { loadOverview(); }, []);
 
-  const products = useMemo(() => data?.products.filter((product) => `${product.name} ${product.code} ${product.category}`.toLowerCase().includes(search.toLowerCase())) ?? [], [data?.products, search]);
+  const products = useMemo(() => (data?.products ?? [])
+    .filter((product) => `${product.name} ${product.code} ${product.category}`.toLowerCase().includes(search.toLowerCase()))
+    .sort((left, right) => left.price - right.price), [data?.products, search]);
   const orders = overview?.orders ?? [];
   const activeOrder = orders.find((order) => !["DELIVERED", "REJECTED"].includes(order.status));
   const currentUser = overview?.user ?? user;
@@ -94,8 +96,8 @@ export default function TaskCenterPage() {
         </section>
 
         <section className="mt-8">
-          <div className="flex items-end justify-between gap-4"><div><p className="text-xs font-black uppercase tracking-[.18em] text-shopee-500">Available orders</p><h2 className="mt-1 text-2xl font-black tracking-tight text-slate-900">Choose a task product</h2></div><span className="hidden text-sm font-bold text-slate-400 sm:block">{products.length} products available</span></div>
-          {bootstrapLoading ? <div className="mt-5 grid grid-cols-2 gap-4 xl:grid-cols-4">{Array.from({ length: 4 }).map((_, index) => <div key={index} className="h-80 animate-pulse rounded-3xl bg-slate-200" />)}</div> : <div className="mt-5 grid grid-cols-2 gap-3 sm:gap-5 xl:grid-cols-4">{products.map((product) => <article key={product.id} className="group overflow-hidden rounded-3xl border border-orange-100 bg-white shadow-card transition hover:-translate-y-1 hover:shadow-xl"><div className="relative aspect-[4/3] overflow-hidden bg-slate-100"><img src={product.imageUrl} alt={product.name} className="h-full w-full object-cover transition duration-500 group-hover:scale-105" /><span className="absolute left-3 top-3 rounded-full bg-shopee-500 px-2.5 py-1 text-[10px] font-black uppercase text-white">Commission</span><button className="absolute right-3 top-3 grid h-8 w-8 place-items-center rounded-full bg-white/90 text-slate-400 shadow" aria-label="Save product"><Heart size={16} /></button></div><div className="p-3.5 sm:p-4"><p className="text-[10px] font-black uppercase tracking-wide text-shopee-500">{product.category}</p><h3 className="mt-1 line-clamp-2 min-h-10 text-sm font-black leading-5 text-slate-900">{product.name}</h3><p className="mt-3 text-base font-black text-shopee-500 sm:text-lg">{money(product.price)}</p><div className="mt-1 flex items-center gap-1 text-xs font-bold text-emerald-600"><BadgePercent size={14} /> +{money(product.commission)}</div><Button loading={acceptingId === product.id} disabled={Boolean(activeOrder)} onClick={() => acceptTask(product.id)} className="mt-4 h-10 w-full px-3 text-xs">Select task</Button></div></article>)}</div>}
+          <div className="flex items-end justify-between gap-4"><div><p className="text-xs font-black uppercase tracking-[.18em] text-shopee-500">Product catalog</p><h2 className="mt-1 text-2xl font-black tracking-tight text-slate-900">Browse items by price</h2><p className="mt-1 text-xs font-semibold text-slate-400">Displayed from lowest to highest price.</p></div><span className="hidden text-sm font-bold text-slate-400 sm:block">{products.length} products available</span></div>
+          {bootstrapLoading ? <div className="mt-5 grid grid-cols-2 gap-4 xl:grid-cols-4">{Array.from({ length: 4 }).map((_, index) => <div key={index} className="h-64 animate-pulse rounded-3xl bg-slate-200" />)}</div> : <div className="mt-5 grid grid-cols-2 gap-3 sm:gap-5 xl:grid-cols-4">{products.map((product) => <article key={product.id} className="group overflow-hidden rounded-3xl border border-orange-100 bg-white shadow-card transition hover:-translate-y-1 hover:shadow-xl"><div className="relative aspect-[4/3] overflow-hidden bg-slate-100"><img src={product.imageUrl} alt={product.name} className="h-full w-full object-cover transition duration-500 group-hover:scale-105" /><button className="absolute right-3 top-3 grid h-8 w-8 place-items-center rounded-full bg-white/90 text-slate-400 shadow" aria-label="Save product"><Heart size={16} /></button></div><div className="p-3.5 sm:p-4"><p className="text-[10px] font-black uppercase tracking-wide text-shopee-500">{product.category}</p><h3 className="mt-1 line-clamp-2 min-h-10 text-sm font-black leading-5 text-slate-900">{product.name}</h3><p className="mt-3 text-base font-black text-shopee-500 sm:text-lg">{money(product.price)}</p></div></article>)}</div>}
         </section>
       </main>
     </CustomerShell>
