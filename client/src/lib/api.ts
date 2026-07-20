@@ -16,11 +16,11 @@ export async function api<T>(path: string, options: RequestInit = {}): Promise<T
       },
     });
   } catch {
-    throw new ApiError("The local API is unavailable. Make sure XAMPP MySQL and the combined development server are running.", 0);
+    throw new ApiError("The API is unavailable. Check the local server and Neon database connection.", 0);
   }
   if (!response.ok) {
     const fallback = response.status >= 500
-      ? "The local API is unavailable. Make sure XAMPP MySQL and the combined development server are running."
+      ? "The API is unavailable. Check the local server and Neon database connection."
       : "Request failed.";
     const result = await response.json().catch(() => ({ error: fallback }));
     throw new ApiError(result.error || "Request failed.", response.status);

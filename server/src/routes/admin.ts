@@ -9,6 +9,16 @@ import { asyncHandler, HttpError, jsonSafe, requestNumber } from "../lib/http.js
 const router = Router();
 const staffRoles = [UserRole.SUPER_ADMIN, UserRole.ADMIN, UserRole.EMPLOYEE];
 
+const catalogProductInputSchema = z.object({
+  code: z.string().trim().min(2).max(40).regex(/^[a-zA-Z0-9._-]+$/, "Use letters, numbers, dots, dashes, or underscores only.").transform((value) => value.toUpperCase()),
+  name: z.string().trim().min(2).max(180),
+  description: z.string().trim().max(5000).optional().default(""),
+  price: z.number().int().positive().max(1_000_000_000_000),
+  category: z.string().trim().min(2).max(80),
+  imageUrl: z.string().trim().url().max(2000).refine((value) => value.startsWith("https://"), "Use a secure https:// image URL."),
+  active: z.boolean(),
+});
+
 router.use(authenticateAdmin, requireRole(...staffRoles));
 
 router.get(
@@ -21,17 +31,18 @@ router.get(
     const transactionFilter = scopedUserIds ? { userId: { in: scopedUserIds } } : {};
     const orderFilter = scopedUserIds ? { userId: { in: scopedUserIds } } : {};
 
-    const [members, transactions, orders, products, banks, staff] = await Promise.all([
+    const [members, transactions, orders, taskProducts, catalogProducts, banks, staff] = await Promise.all([
       prisma.user.findMany({ where: userFilter, select: { id: true, username: true, displayName: true, phone: true, balance: true, level: true, totalOrders: true, withdrawalLocked: true, withdrawalRemarks: true, createdAt: true, referrer: { select: { displayName: true } } }, orderBy: { createdAt: "desc" } }),
       prisma.transaction.findMany({ where: transactionFilter, include: { user: { select: { username: true, displayName: true } }, reviewer: { select: { displayName: true } } }, orderBy: { createdAt: "desc" }, take: 200 }),
       prisma.order.findMany({ where: orderFilter, include: { user: { select: { username: true, displayName: true, balance: true } }, items: true }, orderBy: { createdAt: "desc" }, take: 200 }),
       prisma.product.findMany({ orderBy: { createdAt: "desc" } }),
+      prisma.catalogProduct.findMany({ orderBy: [{ price: "asc" }, { name: "asc" }] }),
       prisma.bank.findMany({ orderBy: { createdAt: "desc" } }),
       request.auth!.role === UserRole.SUPER_ADMIN
         ? prisma.user.findMany({ where: { role: { in: staffRoles } }, select: { id: true, username: true, displayName: true, role: true, invitationCode: true, adminCode: true, registrationBonus: true, isActive: true } })
         : Promise.resolve([]),
     ]);
-    response.json(jsonSafe({ members, transactions, orders, products, banks, staff }));
+    response.json(jsonSafe({ members, transactions, orders, taskProducts, catalogProducts, banks, staff }));
   }),
 );
 
@@ -134,6 +145,89 @@ router.patch(
     const input = z.object({ locked: z.boolean(), remarks: z.string().trim().max(500).optional() }).parse(request.body);
     const user = await prisma.user.update({ where: { id: String(request.params.id) }, data: { withdrawalLocked: input.locked, withdrawalRemarks: input.remarks || null } });
     response.json(jsonSafe({ user }));
+  }),
+);
+
+router.post(
+  "/catalog-products",
+  requireRole(UserRole.SUPER_ADMIN),
+  asyncHandler(async (request: AuthRequest, response) => {
+    const input = catalogProductInputSchema.parse(request.body);
+    const product = await prisma.$transaction(async (database) => {
+      const created = await database.catalogProduct.create({
+        data: {
+          ...input,
+          description: input.description || null,
+          price: BigInt(input.price),
+        },
+      });
+      await database.auditLog.create({
+        data: {
+          actorId: request.auth!.id,
+          action: "CATALOG_PRODUCT_CREATED",
+          entityType: "CatalogProduct",
+          entityId: created.id,
+          details: { code: created.code, name: created.name },
+        },
+      });
+      return created;
+    });
+    response.status(201).json(jsonSafe({ product }));
+  }),
+);
+
+router.patch(
+  "/catalog-products/:id",
+  requireRole(UserRole.SUPER_ADMIN),
+  asyncHandler(async (request: AuthRequest, response) => {
+    const input = catalogProductInputSchema.parse(request.body);
+    const existing = await prisma.catalogProduct.findUnique({ where: { id: String(request.params.id) } });
+    if (!existing) throw new HttpError(404, "Catalog product not found.");
+
+    const product = await prisma.$transaction(async (database) => {
+      const updated = await database.catalogProduct.update({
+        where: { id: existing.id },
+        data: {
+          ...input,
+          description: input.description || null,
+          price: BigInt(input.price),
+        },
+      });
+      await database.auditLog.create({
+        data: {
+          actorId: request.auth!.id,
+          action: "CATALOG_PRODUCT_UPDATED",
+          entityType: "CatalogProduct",
+          entityId: updated.id,
+          details: { code: updated.code, name: updated.name, previousCode: existing.code },
+        },
+      });
+      return updated;
+    });
+    response.json(jsonSafe({ product }));
+  }),
+);
+
+router.delete(
+  "/catalog-products/:id",
+  requireRole(UserRole.SUPER_ADMIN),
+  asyncHandler(async (request: AuthRequest, response) => {
+    const existing = await prisma.catalogProduct.findUnique({ where: { id: String(request.params.id) } });
+    if (!existing) throw new HttpError(404, "Catalog product not found.");
+
+    await prisma.$transaction(async (database) => {
+      await database.catalogProduct.delete({ where: { id: existing.id } });
+      await database.auditLog.create({
+        data: {
+          actorId: request.auth!.id,
+          action: "CATALOG_PRODUCT_DELETED",
+          entityType: "CatalogProduct",
+          entityId: existing.id,
+          details: { code: existing.code, name: existing.name },
+        },
+      });
+    });
+    response.status(204).end();
   }),
 );
 

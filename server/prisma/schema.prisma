@@ -97,6 +97,24 @@ model Product {
   @@index([category, active])
 }
 
+// Display-only merchandise. These records are intentionally unrelated to
+// Product and OrderItem so customer catalog browsing cannot create task items.
+model CatalogProduct {
+  id          String   @id @default(cuid())
+  code        String   @unique @db.VarChar(40)
+  name        String   @db.VarChar(180)
+  description String?  @db.Text
+  price       BigInt
+  category    String   @db.VarChar(80)
+  imageUrl    String   @db.Text
+  active      Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@index([category, active])
+  @@index([active, price])
+}
+
 model Bank {
   id            String   @id @default(cuid())
   bankName      String   @db.VarChar(80)

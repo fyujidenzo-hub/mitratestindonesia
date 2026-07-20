@@ -1,15 +1,17 @@
 import { Router } from "express";
 import bcrypt from "bcryptjs";
+import rateLimit from "express-rate-limit";
 import multer from "multer";
 import path from "node:path";
 import { z } from "zod";
-import { OrderStatus, TransactionStatus, TransactionType } from "@prisma/client";
+import { OrderStatus, TransactionStatus, TransactionType, UserRole } from "@prisma/client";
 import { authenticateCustomer, type AuthRequest } from "../middleware/auth.js";
 import { prisma } from "../lib/prisma.js";
 import { asyncHandler, HttpError, jsonSafe, requestNumber } from "../lib/http.js";
 
 const router = Router();
 const activeStatuses = [OrderStatus.WAITING_ASSIGNMENT, OrderStatus.PRODUCT_ASSIGNED, OrderStatus.WAITING_SHIPMENT, OrderStatus.PENDING_DELIVERY];
+const securityLimiter = rateLimit({ windowMs: 15 * 60_000, limit: 5, standardHeaders: "draft-8", legacyHeaders: false });
 
 router.use(authenticateCustomer);
 
@@ -36,6 +38,54 @@ router.get(
     if (!user) throw new HttpError(404, "Account not found.");
     const { passwordHash: _passwordHash, withdrawalPasswordHash: _withdrawalPasswordHash, ...safeUser } = user;
     response.json(jsonSafe({ user: safeUser, transactions, orders }));
+  }),
+);
+
+router.patch(
+  "/security/password",
+  securityLimiter,
+  asyncHandler(async (request: AuthRequest, response) => {
+    const input = z.object({
+      currentPassword: z.string().min(4).max(100),
+      newPassword: z.string().min(8).max(100),
+    }).parse(request.body);
+    const user = await prisma.user.findFirst({ where: { id: request.auth!.id, role: UserRole.CUSTOMER, isActive: true }, select: { id: true, passwordHash: true } });
+    if (!user || !(await bcrypt.compare(input.currentPassword, user.passwordHash))) {
+      throw new HttpError(400, "The current account password is incorrect.");
+    }
+    if (await bcrypt.compare(input.newPassword, user.passwordHash)) {
+      throw new HttpError(400, "Choose a new password that is different from your current password.");
+    }
+    const passwordHash = await bcrypt.hash(input.newPassword, 12);
+    await prisma.$transaction([
+      prisma.user.update({ where: { id: user.id }, data: { passwordHash } }),
+      prisma.auditLog.create({ data: { actorId: user.id, action: "ACCOUNT_PASSWORD_RESET", entityType: "User", entityId: user.id } }),
+    ]);
+    response.status(204).end();
+  }),
+);
+
+router.patch(
+  "/security/withdrawal-password",
+  securityLimiter,
+  asyncHandler(async (request: AuthRequest, response) => {
+    const input = z.object({
+      accountPassword: z.string().min(4).max(100),
+      newWithdrawalPassword: z.string().regex(/^\d{6}$/, "Use a 6 digit withdrawal PIN."),
+    }).parse(request.body);
+    const user = await prisma.user.findFirst({ where: { id: request.auth!.id, role: UserRole.CUSTOMER, isActive: true }, select: { id: true, passwordHash: true, withdrawalPasswordHash: true } });
+    if (!user || !(await bcrypt.compare(input.accountPassword, user.passwordHash))) {
+      throw new HttpError(400, "The account password is incorrect.");
+    }
+    if (user.withdrawalPasswordHash && await bcrypt.compare(input.newWithdrawalPassword, user.withdrawalPasswordHash)) {
+      throw new HttpError(400, "Choose a withdrawal PIN that is different from your current PIN.");
+    }
+    const withdrawalPasswordHash = await bcrypt.hash(input.newWithdrawalPassword, 12);
+    await prisma.$transaction([
+      prisma.user.update({ where: { id: user.id }, data: { withdrawalPasswordHash } }),
+      prisma.auditLog.create({ data: { actorId: user.id, action: "WITHDRAWAL_PASSWORD_RESET", entityType: "User", entityId: user.id } }),
+    ]);
+    response.status(204).end();
   }),
 );
 
@@ -106,23 +156,19 @@ router.post(
 router.post(
   "/orders",
   asyncHandler(async (request: AuthRequest, response) => {
-    const input = z.object({ productId: z.string().optional() }).parse(request.body);
+    z.object({}).strict().parse(request.body ?? {});
     const activeOrder = await prisma.order.findFirst({ where: { userId: request.auth!.id, status: { in: activeStatuses } } });
     if (activeOrder) throw new HttpError(409, "You still have an active task.");
 
-    const product = input.productId ? await prisma.product.findFirst({ where: { id: input.productId, active: true } }) : null;
     const order = await prisma.order.create({
       data: {
         referenceNumber: requestNumber("PSN"),
         userId: request.auth!.id,
         status: OrderStatus.WAITING_ASSIGNMENT,
-        totalValue: product?.price ?? 0n,
-        commission: product?.commission ?? 0n,
-        requiredBalance: product?.requiredBalance ?? 0n,
-        items: product
-          ? { create: [{ productId: product.id, productCode: product.code, productName: product.name, price: product.price, commission: product.commission, quantity: 1, total: product.price }] }
-          : undefined,
-        events: { create: [{ actorId: request.auth!.id, toStatus: OrderStatus.WAITING_ASSIGNMENT, note: product ? "Product requested by the customer." : "Task accepted by the customer." }] },
+        totalValue: 0n,
+        commission: 0n,
+        requiredBalance: 0n,
+        events: { create: [{ actorId: request.auth!.id, toStatus: OrderStatus.WAITING_ASSIGNMENT, note: "Task accepted by the customer." }] },
       },
       include: { items: true, events: true },
     });

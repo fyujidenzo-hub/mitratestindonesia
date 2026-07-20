@@ -6,16 +6,18 @@ import {
   ClipboardList,
   Headphones,
   PackageCheck,
+  ShoppingBag,
   Sparkles,
   WalletCards,
   Zap,
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { CustomerShell } from "../components/CustomerShell";
 import { Card, Notice, StatusPill } from "../components/Ui";
 import { api, dateTime, money } from "../lib/api";
 import { useAuth } from "../lib/auth";
+import { useBootstrap } from "../lib/useBootstrap";
 import type { Order, Transaction, User } from "../types";
 
 type Overview = { user: User; transactions: Transaction[]; orders: Order[] };
@@ -29,6 +31,7 @@ const quickActions = [
 
 export default function CustomerHomePage() {
   const { user } = useAuth();
+  const { data: bootstrap, loading: catalogLoading } = useBootstrap();
   const [overview, setOverview] = useState<Overview | null>(null);
   const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState("");
@@ -47,6 +50,12 @@ export default function CustomerHomePage() {
   const completedOrders = orders.filter((order) => order.status === "DELIVERED");
   const totalCommission = completedOrders.reduce((sum, order) => sum + order.commission, 0);
   const firstName = currentUser?.displayName?.trim().split(/\s+/)[0] || "there";
+  const catalogProducts = useMemo(() => (bootstrap?.catalogProducts ?? [])
+    .slice()
+    .sort((left, right) => left.price - right.price || left.name.localeCompare(right.name))
+    .slice(0, 6), [bootstrap?.catalogProducts]);
+  const featuredProduct = catalogProducts[0];
+  const shelfProducts = catalogProducts.slice(1);
 
   return (
     <CustomerShell>
@@ -97,7 +106,7 @@ export default function CustomerHomePage() {
             {loading ? <div className="m-5 h-40 animate-pulse rounded-3xl bg-slate-100 sm:m-6" /> : activeOrder ? (
               <div className="p-5 sm:p-6"><div className="flex flex-col gap-5 rounded-[26px] bg-gradient-to-br from-slate-950 to-slate-800 p-5 text-white sm:flex-row sm:items-center sm:p-6"><span className="grid h-14 w-14 shrink-0 place-items-center rounded-2xl bg-white/10 text-orange-300"><PackageCheck size={27} /></span><div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-2"><h3 className="truncate font-black">{activeOrder.items[0]?.productName || "Waiting for product assignment"}</h3><StatusPill status={activeOrder.status} /></div><p className="mt-2 text-xs font-semibold text-white/50">{activeOrder.referenceNumber} · Commission {money(activeOrder.commission)}</p></div><Link to="/orders" className="inline-flex h-11 shrink-0 items-center justify-center gap-2 rounded-2xl bg-shopee-500 px-5 text-sm font-black text-white">Continue <ArrowRight size={16} /></Link></div></div>
             ) : (
-              <div className="p-5 sm:p-6"><div className="flex flex-col items-start gap-5 rounded-[26px] bg-gradient-to-r from-orange-50 to-amber-50 p-6 sm:flex-row sm:items-center"><span className="grid h-14 w-14 shrink-0 place-items-center rounded-2xl bg-white text-shopee-500 shadow-sm"><Zap size={26} fill="currentColor" /></span><div className="flex-1"><h3 className="font-black text-slate-900">Ready for your next opportunity?</h3><p className="mt-1 text-sm font-semibold leading-6 text-slate-500">Open the lightning Task Center to choose an available product and begin.</p></div><Link to="/task-center" className="inline-flex h-11 items-center gap-2 rounded-2xl bg-shopee-500 px-5 text-sm font-black text-white">Find a task <ArrowRight size={16} /></Link></div></div>
+              <div className="p-5 sm:p-6"><div className="flex flex-col items-start gap-5 rounded-[26px] bg-gradient-to-r from-orange-50 to-amber-50 p-6 sm:flex-row sm:items-center"><span className="grid h-14 w-14 shrink-0 place-items-center rounded-2xl bg-white text-shopee-500 shadow-sm"><Zap size={26} fill="currentColor" /></span><div className="flex-1"><h3 className="font-black text-slate-900">Ready for your next opportunity?</h3><p className="mt-1 text-sm font-semibold leading-6 text-slate-500">Open the lightning Task Center to request an available task. Product assignment happens separately.</p></div><Link to="/task-center" className="inline-flex h-11 items-center gap-2 rounded-2xl bg-shopee-500 px-5 text-sm font-black text-white">Find a task <ArrowRight size={16} /></Link></div></div>
             )}
           </Card>
 
@@ -111,9 +120,27 @@ export default function CustomerHomePage() {
           </Card>
         </section>
 
+        <section className="mt-5 overflow-hidden rounded-[32px] border border-[#f7dcc8] bg-[#fff8f2] p-5 shadow-card sm:p-7">
+          <div className="flex flex-wrap items-end justify-between gap-4">
+            <div><div className="flex items-center gap-2"><span className="grid h-9 w-9 place-items-center rounded-xl bg-white text-shopee-500 shadow-sm"><ShoppingBag size={18} /></span><p className="text-[10px] font-black uppercase tracking-[.18em] text-shopee-500">Shop window · Display only</p></div><h2 className="mt-3 text-2xl font-black tracking-tight text-slate-900">A little inspiration for today</h2><p className="mt-1 text-sm font-semibold text-slate-500">Browse-only picks shown from lowest to highest price. These never become Task Orders.</p></div>
+            <Link to="/task-center#catalog" className="inline-flex items-center gap-2 rounded-2xl bg-slate-950 px-4 py-3 text-xs font-black text-white">View full catalog <ArrowRight size={15} /></Link>
+          </div>
+
+          {catalogLoading ? <div className="mt-6 grid gap-4 lg:grid-cols-[1.05fr_1fr]"><div className="h-72 animate-pulse rounded-[28px] bg-orange-100" /><div className="grid gap-3 sm:grid-cols-2">{Array.from({ length: 4 }).map((_, index) => <div key={index} className="h-32 animate-pulse rounded-3xl bg-white" />)}</div></div> : featuredProduct ? <div className="mt-6 grid gap-4 lg:grid-cols-[1.05fr_1fr]">
+            <article className="relative min-h-[310px] overflow-hidden rounded-[28px] bg-slate-950 text-white">
+              <img src={featuredProduct.imageUrl} alt={featuredProduct.name} className="absolute inset-0 h-full w-full object-cover opacity-75" />
+              <div className="absolute inset-0 bg-gradient-to-t from-slate-950 via-slate-950/30 to-transparent" />
+              <div className="relative flex min-h-[310px] flex-col justify-end p-6 sm:p-7"><span className="w-fit rounded-full border border-white/20 bg-white/15 px-3 py-1.5 text-[10px] font-black uppercase tracking-wide backdrop-blur">Lowest-priced pick · {featuredProduct.category}</span><h3 className="mt-3 max-w-md text-2xl font-black tracking-tight sm:text-3xl">{featuredProduct.name}</h3><p className="mt-2 text-2xl font-black text-orange-300">{money(featuredProduct.price)}</p></div>
+            </article>
+            <div className="flex snap-x gap-3 overflow-x-auto pb-2 lg:grid lg:grid-cols-2 lg:overflow-visible lg:pb-0">
+              {shelfProducts.map((product) => <article key={product.id} className="flex min-w-[78vw] snap-center gap-3 rounded-[24px] border border-white bg-white p-3 shadow-sm sm:min-w-[320px] lg:min-w-0"><img src={product.imageUrl} alt={product.name} className="h-24 w-24 shrink-0 rounded-[18px] object-cover" /><div className="min-w-0 self-center"><p className="text-[9px] font-black uppercase tracking-wide text-shopee-500">{product.category}</p><h3 className="mt-1 line-clamp-2 text-sm font-black leading-5 text-slate-900">{product.name}</h3><p className="mt-2 text-sm font-black text-shopee-500">{money(product.price)}</p></div></article>)}
+            </div>
+          </div> : <div className="mt-6 rounded-[28px] border border-dashed border-orange-200 bg-white/60 p-8 text-center"><p className="font-black text-slate-900">The display catalog is being prepared.</p><p className="mt-1 text-sm font-semibold text-slate-400">New storefront items will appear here without affecting Task Orders.</p></div>}
+        </section>
+
         <Link to="/task-center" className="group relative mt-5 block min-h-[150px] overflow-hidden rounded-[28px] border border-orange-100 bg-white shadow-card sm:min-h-[190px]">
           <picture><source media="(max-width: 639px)" srcSet="/assets/campaign-mobile-en.png" /><img src="/assets/campaign-desktop-en.png" alt="Super Shopping Day promotion" className="absolute inset-0 h-full w-full object-cover object-center transition duration-500 group-hover:scale-[1.02]" /></picture>
-          <span className="absolute bottom-4 right-4 inline-flex items-center gap-2 rounded-2xl bg-slate-950/90 px-4 py-3 text-xs font-black text-white shadow-xl backdrop-blur">Explore task offers <ArrowRight size={16} /></span>
+          <span className="absolute bottom-4 right-4 inline-flex items-center gap-2 rounded-2xl bg-slate-950/90 px-4 py-3 text-xs font-black text-white shadow-xl backdrop-blur">Explore the full catalog <ArrowRight size={16} /></span>
         </Link>
       </main>
     </CustomerShell>

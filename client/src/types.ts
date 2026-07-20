@@ -34,6 +34,19 @@ export type Product = {
   active: boolean;
 };
 
+// Storefront-only data. It deliberately has no commission, task balance,
+// quantity, or OrderItem fields.
+export type CatalogProduct = {
+  id: string;
+  code: string;
+  name: string;
+  description?: string;
+  price: number;
+  category: string;
+  imageUrl: string;
+  active: boolean;
+};
+
 export type Bank = {
   id: string;
   bankName: string;
@@ -91,7 +104,7 @@ export type Order = {
 };
 
 export type BootstrapData = {
-  products: Product[];
+  catalogProducts: CatalogProduct[];
   banks: Bank[];
   settings: Record<string, string>;
 };

@@ -65,6 +65,15 @@ async function main() {
 
   for (const product of products) {
     await prisma.product.upsert({ where: { code: product.code }, update: product, create: product });
+    const catalogProduct = {
+      code: product.code,
+      name: product.name,
+      price: product.price,
+      category: product.category,
+      imageUrl: product.imageUrl,
+      active: true,
+    };
+    await prisma.catalogProduct.upsert({ where: { code: product.code }, update: {}, create: catalogProduct });
   }
 
   if ((await prisma.bank.count()) === 0) {
