@@ -1,5 +1,6 @@
-import { CheckCircle2, CircleDot, Clock3, PackageCheck, Send, ShoppingBag, Truck } from "lucide-react";
+import { CheckCircle2, CircleDot, Clock3, PackageCheck, Send, ShoppingBag, Truck, Zap } from "lucide-react";
 import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import { CustomerShell } from "../components/CustomerShell";
 import { Button, Card, Notice, StatusPill } from "../components/Ui";
 import { api, dateTime, money } from "../lib/api";
@@ -40,7 +41,7 @@ export default function OrdersPage() {
         {!active.requiresCustomerApproval && active.status === "PRODUCT_ASSIGNED" && <Button loading={loading === "start-shipment"} onClick={() => act("start-shipment")} className="mt-6 w-full sm:w-auto"><Truck size={18} /> Start shipment</Button>}
         {active.status === "WAITING_SHIPMENT" && <Button loading={loading === "submit"} onClick={() => act("submit")} className="mt-6 w-full sm:w-auto"><Send size={18} /> Submit order</Button>}
         {active.status === "PENDING_DELIVERY" && <Button loading={loading === "confirm-delivery"} onClick={() => act("confirm-delivery")} className="mt-6 w-full sm:w-auto"><PackageCheck size={18} /> Confirm delivery</Button>}
-      </div></Card> : <Card className="mt-6 grid place-items-center p-10 text-center"><div className="grid h-16 w-16 place-items-center rounded-3xl bg-shopee-50 text-shopee-500"><ShoppingBag size={30} /></div><h2 className="mt-5 text-xl font-black">No active tasks yet</h2><p className="mt-2 max-w-md text-sm font-semibold leading-6 text-slate-500">Select a product or accept a new task from the home page.</p></Card>}
+      </div></Card> : <Card className="mt-6 grid place-items-center p-10 text-center"><div className="grid h-16 w-16 place-items-center rounded-3xl bg-shopee-50 text-shopee-500"><ShoppingBag size={30} /></div><h2 className="mt-5 text-xl font-black">No active tasks yet</h2><p className="mt-2 max-w-md text-sm font-semibold leading-6 text-slate-500">Select a product or accept a new task from the lightning Task Center.</p><Link to="/task-center" className="mt-5 inline-flex h-11 items-center gap-2 rounded-2xl bg-shopee-500 px-5 text-sm font-black text-white"><Zap size={17} fill="currentColor" /> Open task center</Link></Card>}
     <section className="mt-8"><h2 className="text-xl font-black text-slate-900">Order history</h2><div className="mt-4 grid gap-3">{orders.filter((order) => order.id !== active?.id).map((order) => <Card key={order.id} className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center"><div className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-slate-100 text-slate-500">{order.status === "DELIVERED" ? <CheckCircle2 /> : <Clock3 />}</div><div className="min-w-0 flex-1"><p className="truncate font-black text-slate-900">{order.items[0]?.productName || "Task without a product"}</p><p className="mt-1 text-xs font-semibold text-slate-400">{order.referenceNumber} · {dateTime(order.createdAt)}</p></div><div className="flex items-center justify-between gap-3 sm:block sm:text-right"><StatusPill status={order.status} /><p className="mt-1 text-xs font-black text-emerald-600">+{money(order.commission)}</p></div></Card>)}</div></section>
   </main></CustomerShell>;
 }

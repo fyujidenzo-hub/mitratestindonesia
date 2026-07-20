@@ -4,7 +4,8 @@ import { Brand } from "./Brand";
 import { useAuth } from "../lib/auth";
 
 const desktopNav = [
-  { to: "/", label: "Dashboard", icon: Home },
+  { to: "/", label: "Home", icon: Home },
+  { to: "/task-center", label: "Task Center", icon: Zap },
   { to: "/orders", label: "Task Orders", icon: ClipboardList },
   { to: "/finance", label: "Commission & Balance", icon: WalletCards },
   { to: "/support", label: "Customer Support", icon: Headphones },
@@ -54,7 +55,7 @@ export function CustomerShell({ children, search, onSearch }: { children: React.
             <span className="relative grid h-12 w-12 place-items-center rounded-2xl bg-gradient-to-br from-shopee-500 to-orange-400 text-white shadow-float"><Zap size={24} fill="currentColor" /></span>
             <h3 className="relative mt-4 text-lg font-black text-emerald-700">Keep going!</h3>
             <p className="relative mt-2 text-xs font-semibold leading-5 text-slate-600">Complete your tasks and unlock better commissions every day.</p>
-            <Link to="/orders" className="relative mt-4 inline-flex text-xs font-black text-shopee-500">View active tasks →</Link>
+            <Link to="/task-center" className="relative mt-4 inline-flex text-xs font-black text-shopee-500">Open task center →</Link>
           </div>
         </aside>
 
@@ -64,7 +65,7 @@ export function CustomerShell({ children, search, onSearch }: { children: React.
       <nav className="fixed inset-x-3 bottom-3 z-50 rounded-[28px] border border-orange-100 bg-white/95 px-2 pb-[max(.55rem,env(safe-area-inset-bottom))] pt-2 shadow-[0_16px_55px_rgba(124,41,29,.22)] backdrop-blur-xl lg:hidden">
         <div className="mx-auto grid max-w-xl grid-cols-5 items-end">
           {mobileNav.slice(0, 2).map(({ to, label, icon: Icon }) => <MobileLink key={to} to={to} label={label} icon={Icon} active={to === "/" ? location.pathname === "/" : location.pathname.startsWith(to)} />)}
-          <Link to="/orders" aria-label="Open tasks" className="mx-auto -mt-7 grid h-16 w-16 place-items-center rounded-full border-[6px] border-white bg-gradient-to-br from-shopee-500 to-orange-400 text-white shadow-float transition active:scale-95"><Zap size={29} fill="currentColor" /></Link>
+          <Link to="/task-center" aria-label="Open task center" aria-current={location.pathname.startsWith("/task-center") ? "page" : undefined} className={`mx-auto -mt-7 grid h-16 w-16 place-items-center rounded-full border-[6px] border-white bg-gradient-to-br from-shopee-500 to-orange-400 text-white shadow-float transition active:scale-95 ${location.pathname.startsWith("/task-center") ? "ring-4 ring-orange-200" : ""}`}><Zap size={29} fill="currentColor" /></Link>
           {mobileNav.slice(2).map(({ to, label, icon: Icon }) => <MobileLink key={to} to={to} label={label} icon={Icon} active={location.pathname.startsWith(to)} />)}
         </div>
       </nav>

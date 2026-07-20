@@ -1,103 +1,125 @@
-import { ArrowRight, BadgePercent, CheckCircle2, ClipboardCheck, Coins, Heart, PackageCheck, Sparkles, Star, Target, WalletCards, Zap } from "lucide-react";
-import { useEffect, useMemo, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import {
+  ArrowRight,
+  BadgePercent,
+  Banknote,
+  CheckCircle2,
+  ClipboardList,
+  Headphones,
+  PackageCheck,
+  Sparkles,
+  WalletCards,
+  Zap,
+} from "lucide-react";
+import { useEffect, useState } from "react";
+import { Link } from "react-router-dom";
 import { CustomerShell } from "../components/CustomerShell";
-import { Button, Card, Notice, StatusPill } from "../components/Ui";
-import { api, money } from "../lib/api";
+import { Card, Notice, StatusPill } from "../components/Ui";
+import { api, dateTime, money } from "../lib/api";
 import { useAuth } from "../lib/auth";
-import { useBootstrap } from "../lib/useBootstrap";
 import type { Order, Transaction, User } from "../types";
 
 type Overview = { user: User; transactions: Transaction[]; orders: Order[] };
 
+const quickActions = [
+  { to: "/task-center", label: "Start a task", hint: "Browse available orders", icon: Zap, tone: "bg-orange-50 text-shopee-500" },
+  { to: "/orders", label: "My orders", hint: "Track active progress", icon: ClipboardList, tone: "bg-sky-50 text-sky-600" },
+  { to: "/finance", label: "My balance", hint: "Top up or withdraw", icon: WalletCards, tone: "bg-emerald-50 text-emerald-600" },
+  { to: "/support", label: "Get support", hint: "We're here to help", icon: Headphones, tone: "bg-violet-50 text-violet-600" },
+];
+
 export default function CustomerHomePage() {
   const { user } = useAuth();
-  const { data, loading: bootstrapLoading } = useBootstrap();
   const [overview, setOverview] = useState<Overview | null>(null);
-  const [search, setSearch] = useState("");
+  const [loading, setLoading] = useState(true);
   const [message, setMessage] = useState("");
-  const [acceptingId, setAcceptingId] = useState("");
-  const navigate = useNavigate();
 
-  const loadOverview = () => api<Overview>("/customer/overview").then(setOverview);
-  useEffect(() => { loadOverview(); }, []);
+  useEffect(() => {
+    api<Overview>("/customer/overview")
+      .then(setOverview)
+      .catch((error) => setMessage(error instanceof Error ? error.message : "Unable to load your home page."))
+      .finally(() => setLoading(false));
+  }, []);
 
-  const products = useMemo(() => data?.products.filter((product) => `${product.name} ${product.code} ${product.category}`.toLowerCase().includes(search.toLowerCase())) ?? [], [data?.products, search]);
-  const orders = overview?.orders ?? [];
-  const activeOrder = orders.find((order) => !["DELIVERED", "REJECTED"].includes(order.status));
   const currentUser = overview?.user ?? user;
-  const deliveredOrders = orders.filter((order) => order.status === "DELIVERED");
-  const totalCommission = deliveredOrders.reduce((sum, order) => sum + order.commission, 0);
-  const taskGoal = 15;
-  const completed = currentUser?.totalOrders ?? 0;
-  const progress = Math.min(100, Math.round((completed / taskGoal) * 100));
-
-  const acceptTask = async (productId?: string) => {
-    if (activeOrder) return navigate("/orders");
-    setAcceptingId(productId || "open");
-    setMessage("");
-    try {
-      await api("/customer/orders", { method: "POST", body: JSON.stringify({ productId }) });
-      await loadOverview();
-      navigate("/orders");
-    } catch (error) {
-      setMessage(error instanceof Error ? error.message : "Unable to accept the task.");
-    } finally { setAcceptingId(""); }
-  };
+  const orders = overview?.orders ?? [];
+  const transactions = overview?.transactions ?? [];
+  const activeOrder = orders.find((order) => !["DELIVERED", "REJECTED"].includes(order.status));
+  const completedOrders = orders.filter((order) => order.status === "DELIVERED");
+  const totalCommission = completedOrders.reduce((sum, order) => sum + order.commission, 0);
+  const firstName = currentUser?.displayName?.trim().split(/\s+/)[0] || "there";
 
   return (
-    <CustomerShell search={search} onSearch={setSearch}>
+    <CustomerShell>
       <main className="mx-auto max-w-[1260px] px-4 py-5 sm:px-6 sm:py-7 lg:px-8">
         {message && <div className="mb-5"><Notice message={message} tone="error" onClose={() => setMessage("")} /></div>}
 
-        <section className="relative min-h-[190px] overflow-hidden rounded-[30px] bg-shopee-500 shadow-[0_20px_60px_rgba(238,77,45,.2)] sm:min-h-[240px]">
-          <picture><source media="(max-width: 639px)" srcSet="/assets/campaign-mobile-en.png" /><img src="/assets/campaign-desktop-en.png" alt="Super Shopping Day" className="absolute inset-0 h-full w-full object-cover object-center" /></picture>
-          <div className="absolute inset-0 bg-gradient-to-r from-slate-950/80 via-shopee-900/35 to-transparent" />
-          <div className="relative flex min-h-[190px] max-w-xl flex-col justify-center p-6 text-white sm:min-h-[240px] sm:p-9">
-            <span className="inline-flex w-fit items-center gap-2 rounded-full bg-white/15 px-3 py-1.5 text-[11px] font-black uppercase tracking-wider backdrop-blur"><Sparkles size={14} /> Special promotion</span>
-            <h1 className="mt-4 max-w-md text-3xl font-black leading-[1.05] sm:text-4xl">Shopping tasks made simpler—and more rewarding.</h1>
-            <p className="mt-3 max-w-md text-sm font-semibold leading-6 text-white/80">Free shipping offers, curated orders, and commissions in one polished workspace.</p>
+        <section className="relative overflow-hidden rounded-[32px] bg-gradient-to-br from-[#f04424] via-shopee-500 to-orange-400 p-6 text-white shadow-[0_24px_70px_rgba(238,77,45,.24)] sm:p-8 lg:p-10">
+          <div className="absolute -right-16 -top-24 h-72 w-72 rounded-full border-[42px] border-white/10" />
+          <div className="absolute -bottom-28 right-[24%] h-56 w-56 rounded-full bg-amber-300/20 blur-2xl" />
+          <div className="relative grid items-center gap-8 lg:grid-cols-[1.2fr_.8fr]">
+            <div>
+              <span className="inline-flex items-center gap-2 rounded-full bg-white/15 px-3 py-1.5 text-[10px] font-black uppercase tracking-[.16em] backdrop-blur"><Sparkles size={14} /> Your workday, organized</span>
+              <h1 className="mt-5 max-w-2xl text-3xl font-black leading-[1.08] tracking-tight sm:text-4xl lg:text-5xl">Welcome back, {firstName}.</h1>
+              <p className="mt-3 max-w-xl text-sm font-semibold leading-6 text-white/78 sm:text-base">See what needs your attention, track your earnings, and jump into your next task from one calm home base.</p>
+              <div className="mt-6 flex flex-wrap gap-3">
+                <Link to="/task-center" className="inline-flex h-12 items-center gap-2 rounded-2xl bg-white px-5 text-sm font-black text-shopee-600 shadow-lg transition hover:-translate-y-0.5"><Zap size={18} fill="currentColor" /> Open task center</Link>
+                <Link to="/orders" className="inline-flex h-12 items-center gap-2 rounded-2xl border border-white/25 bg-white/10 px-5 text-sm font-black text-white backdrop-blur transition hover:bg-white/20">View my orders <ArrowRight size={17} /></Link>
+              </div>
+            </div>
+
+            <div className="rounded-[28px] border border-white/25 bg-white/14 p-5 backdrop-blur-xl sm:p-6">
+              <div className="flex items-start justify-between gap-4"><div><p className="text-[10px] font-black uppercase tracking-[.16em] text-white/65">Available balance</p><p className="mt-2 text-3xl font-black tracking-tight sm:text-4xl">{money(currentUser?.balance ?? 0)}</p></div><span className="grid h-12 w-12 place-items-center rounded-2xl bg-white text-shopee-500 shadow-lg"><WalletCards size={24} /></span></div>
+              <div className="mt-6 grid grid-cols-2 gap-3 border-t border-white/20 pt-5"><div><p className="text-[10px] font-black uppercase tracking-wide text-white/60">Completed</p><p className="mt-1 text-xl font-black">{currentUser?.totalOrders ?? 0} tasks</p></div><div><p className="text-[10px] font-black uppercase tracking-wide text-white/60">Level</p><p className="mt-1 text-xl font-black">{currentUser?.level || "STARTER"}</p></div></div>
+            </div>
           </div>
         </section>
 
-        <section className="mt-5 grid grid-cols-2 gap-3 xl:grid-cols-[.72fr_1.45fr_.72fr] xl:gap-5">
-          <Card className="relative overflow-hidden border-0 bg-gradient-to-br from-shopee-500 to-orange-500 p-5 text-white shadow-float sm:p-6">
-            <div className="absolute -right-10 -top-12 h-32 w-32 rounded-full border-[22px] border-white/10" />
-            <div className="relative grid h-12 w-12 place-items-center rounded-2xl bg-white text-shopee-500"><ClipboardCheck /></div>
-            <p className="relative mt-5 text-2xl font-black sm:text-3xl">{currentUser?.level || "STARTER"}</p>
-            <div className="relative mt-4 h-2 overflow-hidden rounded-full bg-white/30"><span className="block h-full rounded-full bg-amber-300" style={{ width: `${Math.max(progress, 8)}%` }} /></div>
-            <p className="relative mt-3 text-xs font-bold text-white/75">{completed} tasks completed</p>
-            <div className="relative mt-4 rounded-2xl bg-white/15 p-3 text-[11px] font-black backdrop-blur"><Star size={15} className="mr-1 inline text-amber-300" fill="currentColor" /> Complete your next task to level up.</div>
+        <section className="mt-5 grid grid-cols-2 gap-3 lg:grid-cols-4 lg:gap-4">
+          {quickActions.map(({ to, label, hint, icon: Icon, tone }) => (
+            <Link key={to} to={to} className="group rounded-[24px] border border-orange-100 bg-white p-4 shadow-card transition hover:-translate-y-1 hover:border-orange-200 hover:shadow-xl sm:p-5">
+              <span className={`grid h-11 w-11 place-items-center rounded-2xl ${tone}`}><Icon size={21} /></span>
+              <p className="mt-4 text-sm font-black text-slate-900 sm:text-base">{label}</p>
+              <p className="mt-1 text-[11px] font-semibold text-slate-400 sm:text-xs">{hint}</p>
+              <ArrowRight size={16} className="mt-3 text-slate-300 transition group-hover:translate-x-1 group-hover:text-shopee-500" />
+            </Link>
+          ))}
+        </section>
+
+        <section className="mt-5 grid gap-3 sm:grid-cols-3 sm:gap-4">
+          <SummaryCard icon={<WalletCards />} label="Account balance" value={money(currentUser?.balance ?? 0)} tone="bg-emerald-50 text-emerald-600" />
+          <SummaryCard icon={<CheckCircle2 />} label="Completed tasks" value={String(currentUser?.totalOrders ?? 0)} tone="bg-sky-50 text-sky-600" />
+          <SummaryCard icon={<BadgePercent />} label="Total commission" value={money(totalCommission)} tone="bg-orange-50 text-shopee-500" />
+        </section>
+
+        <section className="mt-5 grid gap-5 xl:grid-cols-[1.15fr_.85fr]">
+          <Card className="overflow-hidden border-orange-100 shadow-card">
+            <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4 sm:px-6"><div><p className="text-[10px] font-black uppercase tracking-[.16em] text-shopee-500">Right now</p><h2 className="mt-1 text-xl font-black text-slate-900">Your active task</h2></div><Link to="/orders" className="text-xs font-black text-shopee-500">View orders →</Link></div>
+            {loading ? <div className="m-5 h-40 animate-pulse rounded-3xl bg-slate-100 sm:m-6" /> : activeOrder ? (
+              <div className="p-5 sm:p-6"><div className="flex flex-col gap-5 rounded-[26px] bg-gradient-to-br from-slate-950 to-slate-800 p-5 text-white sm:flex-row sm:items-center sm:p-6"><span className="grid h-14 w-14 shrink-0 place-items-center rounded-2xl bg-white/10 text-orange-300"><PackageCheck size={27} /></span><div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-2"><h3 className="truncate font-black">{activeOrder.items[0]?.productName || "Waiting for product assignment"}</h3><StatusPill status={activeOrder.status} /></div><p className="mt-2 text-xs font-semibold text-white/50">{activeOrder.referenceNumber} · Commission {money(activeOrder.commission)}</p></div><Link to="/orders" className="inline-flex h-11 shrink-0 items-center justify-center gap-2 rounded-2xl bg-shopee-500 px-5 text-sm font-black text-white">Continue <ArrowRight size={16} /></Link></div></div>
+            ) : (
+              <div className="p-5 sm:p-6"><div className="flex flex-col items-start gap-5 rounded-[26px] bg-gradient-to-r from-orange-50 to-amber-50 p-6 sm:flex-row sm:items-center"><span className="grid h-14 w-14 shrink-0 place-items-center rounded-2xl bg-white text-shopee-500 shadow-sm"><Zap size={26} fill="currentColor" /></span><div className="flex-1"><h3 className="font-black text-slate-900">Ready for your next opportunity?</h3><p className="mt-1 text-sm font-semibold leading-6 text-slate-500">Open the lightning Task Center to choose an available product and begin.</p></div><Link to="/task-center" className="inline-flex h-11 items-center gap-2 rounded-2xl bg-shopee-500 px-5 text-sm font-black text-white">Find a task <ArrowRight size={16} /></Link></div></div>
+            )}
           </Card>
 
-          <Card className="col-span-2 order-3 border-0 p-5 shadow-card sm:p-6 xl:order-none xl:col-span-1">
-            <div className="grid gap-4 sm:grid-cols-2 sm:gap-0 sm:divide-x sm:divide-slate-100">
-              <div className="flex items-center gap-4 sm:pr-6"><span className="grid h-12 w-12 shrink-0 place-items-center rounded-2xl bg-orange-50 text-shopee-500"><Coins /></span><div><p className="text-xs font-black uppercase tracking-wide text-slate-400">Total commission</p><p className="mt-1 text-xl font-black text-shopee-500">{money(totalCommission)}</p><p className="mt-1 text-[11px] font-semibold text-slate-400">Credited after completed orders</p></div></div>
-              <div className="flex items-center gap-4 border-t border-slate-100 pt-4 sm:border-t-0 sm:pl-6 sm:pt-0"><span className="grid h-12 w-12 shrink-0 place-items-center rounded-2xl bg-emerald-50 text-emerald-600"><WalletCards /></span><div><p className="text-xs font-black uppercase tracking-wide text-slate-400">Account balance</p><p className="mt-1 text-xl font-black text-slate-900">{money(currentUser?.balance ?? 0)}</p><div className="mt-1 flex gap-3 text-[11px] font-black"><Link to="/finance?tab=topup" className="text-shopee-500">Top up</Link><Link to="/finance?tab=withdraw" className="text-emerald-600">Withdraw</Link></div></div></div>
+          <Card className="overflow-hidden border-orange-100 shadow-card">
+            <div className="flex items-center justify-between border-b border-slate-100 px-5 py-4 sm:px-6"><div><p className="text-[10px] font-black uppercase tracking-[.16em] text-emerald-600">Activity</p><h2 className="mt-1 text-xl font-black text-slate-900">Recent balance updates</h2></div><Link to="/finance" className="text-xs font-black text-shopee-500">View all →</Link></div>
+            <div className="divide-y divide-slate-100">
+              {loading ? Array.from({ length: 3 }).map((_, index) => <div key={index} className="mx-5 my-4 h-12 animate-pulse rounded-2xl bg-slate-100" />) : transactions.length ? transactions.slice(0, 4).map((transaction) => (
+                <div key={transaction.id} className="flex items-center gap-3 px-5 py-4 sm:px-6"><span className={`grid h-10 w-10 shrink-0 place-items-center rounded-2xl ${transaction.type === "TOPUP" ? "bg-orange-50 text-shopee-500" : transaction.type === "WITHDRAWAL" ? "bg-sky-50 text-sky-600" : "bg-emerald-50 text-emerald-600"}`}>{transaction.type === "WITHDRAWAL" ? <Banknote size={18} /> : transaction.type === "TOPUP" ? <WalletCards size={18} /> : <CheckCircle2 size={18} />}</span><div className="min-w-0 flex-1"><p className="text-sm font-black text-slate-900">{transaction.type.replace("_", " ")}</p><p className="truncate text-[10px] font-semibold text-slate-400">{dateTime(transaction.createdAt)}</p></div><div className="text-right"><p className="text-sm font-black text-slate-900">{money(transaction.amount)}</p><StatusPill status={transaction.status} /></div></div>
+              )) : <p className="p-8 text-center text-sm font-semibold text-slate-400">Your recent balance activity will appear here.</p>}
             </div>
-            <Button loading={acceptingId === "open"} onClick={() => acceptTask()} className="mt-5 h-[52px] w-full text-base"><Zap size={20} fill="currentColor" /> {activeOrder ? "Continue Active Order" : "Accept an Order"}</Button>
-          </Card>
-
-          <Card className="relative overflow-hidden border-orange-100 p-5 text-center shadow-card sm:p-6">
-            <div className="mx-auto grid h-12 w-12 place-items-center rounded-2xl bg-shopee-50 text-shopee-500"><Target /></div>
-            <p className="mt-4 text-3xl font-black text-shopee-500">{progress}%</p>
-            <p className="mt-1 text-xs font-black text-slate-500">Task goal progress</p>
-            <p className="mt-3 text-2xl font-black text-slate-900">{completed}<span className="text-sm text-slate-400"> / {taskGoal}</span></p>
-            <div className="mt-4 rounded-2xl bg-orange-50 px-3 py-2 text-[11px] font-black text-shopee-600">You've got this! <Heart size={14} className="ml-1 inline" fill="currentColor" /></div>
           </Card>
         </section>
 
-        {activeOrder && <Card className="mt-5 overflow-hidden border-orange-100 p-5 sm:p-6"><div className="flex flex-col gap-4 sm:flex-row sm:items-center"><div className="grid h-14 w-14 shrink-0 place-items-center rounded-2xl bg-shopee-50 text-shopee-500"><PackageCheck size={27} /></div><div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-2"><p className="font-black text-slate-900">Active order in progress</p><StatusPill status={activeOrder.status} /></div><p className="mt-1 truncate text-sm font-semibold text-slate-500">{activeOrder.items[0]?.productName || "Waiting for product assignment"} · {activeOrder.referenceNumber}</p></div><Link to="/orders" className="inline-flex h-11 items-center justify-center gap-2 rounded-2xl bg-slate-950 px-5 text-sm font-black text-white">View progress <ArrowRight size={16} /></Link></div></Card>}
-
-        <section className="mt-5 overflow-hidden rounded-[28px] border border-emerald-100 bg-gradient-to-r from-emerald-50 via-amber-50 to-orange-50 p-5 sm:flex sm:items-center sm:justify-between sm:p-6">
-          <div><p className="text-xl font-black text-emerald-700">Stay motivated! 💪</p><p className="mt-1 max-w-2xl text-sm font-semibold leading-6 text-slate-600">Complete your order tasks and build a stronger commission record every day.</p></div><Link to="/orders" className="mt-4 inline-flex items-center gap-2 text-sm font-black text-shopee-500 sm:mt-0">See task center <ArrowRight size={17} /></Link>
-        </section>
-
-        <section className="mt-8">
-          <div className="flex items-end justify-between gap-4"><div><p className="text-xs font-black uppercase tracking-[.18em] text-shopee-500">Available orders</p><h2 className="mt-1 text-2xl font-black tracking-tight text-slate-900">Choose a task product</h2></div><span className="hidden text-sm font-bold text-slate-400 sm:block">{products.length} products available</span></div>
-          {bootstrapLoading ? <div className="mt-5 grid grid-cols-2 gap-4 xl:grid-cols-4">{Array.from({ length: 4 }).map((_, index) => <div key={index} className="h-80 animate-pulse rounded-3xl bg-slate-200" />)}</div> : <div className="mt-5 grid grid-cols-2 gap-3 sm:gap-5 xl:grid-cols-4">{products.map((product) => <article key={product.id} className="group overflow-hidden rounded-3xl border border-orange-100 bg-white shadow-card transition hover:-translate-y-1 hover:shadow-xl"><div className="relative aspect-[4/3] overflow-hidden bg-slate-100"><img src={product.imageUrl} alt={product.name} className="h-full w-full object-cover transition duration-500 group-hover:scale-105" /><span className="absolute left-3 top-3 rounded-full bg-shopee-500 px-2.5 py-1 text-[10px] font-black uppercase text-white">Commission</span><button className="absolute right-3 top-3 grid h-8 w-8 place-items-center rounded-full bg-white/90 text-slate-400 shadow" aria-label="Save product"><Heart size={16} /></button></div><div className="p-3.5 sm:p-4"><p className="text-[10px] font-black uppercase tracking-wide text-shopee-500">{product.category}</p><h3 className="mt-1 line-clamp-2 min-h-10 text-sm font-black leading-5 text-slate-900">{product.name}</h3><p className="mt-3 text-base font-black text-shopee-500 sm:text-lg">{money(product.price)}</p><div className="mt-1 flex items-center gap-1 text-xs font-bold text-emerald-600"><BadgePercent size={14} /> +{money(product.commission)}</div><Button loading={acceptingId === product.id} disabled={Boolean(activeOrder)} onClick={() => acceptTask(product.id)} className="mt-4 h-10 w-full px-3 text-xs">Select task</Button></div></article>)}</div>}
-        </section>
+        <Link to="/task-center" className="group relative mt-5 block min-h-[150px] overflow-hidden rounded-[28px] border border-orange-100 bg-white shadow-card sm:min-h-[190px]">
+          <picture><source media="(max-width: 639px)" srcSet="/assets/campaign-mobile-en.png" /><img src="/assets/campaign-desktop-en.png" alt="Super Shopping Day promotion" className="absolute inset-0 h-full w-full object-cover object-center transition duration-500 group-hover:scale-[1.02]" /></picture>
+          <span className="absolute bottom-4 right-4 inline-flex items-center gap-2 rounded-2xl bg-slate-950/90 px-4 py-3 text-xs font-black text-white shadow-xl backdrop-blur">Explore task offers <ArrowRight size={16} /></span>
+        </Link>
       </main>
     </CustomerShell>
   );
+}
+
+function SummaryCard({ icon, label, value, tone }: { icon: React.ReactNode; label: string; value: string; tone: string }) {
+  return <Card className="flex items-center gap-4 border-orange-100 p-4 shadow-card sm:p-5"><span className={`grid h-12 w-12 shrink-0 place-items-center rounded-2xl ${tone}`}>{icon}</span><div className="min-w-0"><p className="text-[10px] font-black uppercase tracking-wide text-slate-400">{label}</p><p className="mt-1 truncate text-lg font-black text-slate-900 sm:text-xl">{value}</p></div></Card>;
 }
