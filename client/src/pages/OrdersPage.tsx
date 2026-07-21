@@ -1,5 +1,5 @@
 import { AlertTriangle, CheckCircle2, CircleDot, Clock3, Gift, ShoppingBag, Zap } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { CustomerShell } from "../components/CustomerShell";
 import { Card, Notice, StatusPill } from "../components/Ui";
@@ -26,11 +26,16 @@ export default function OrdersPage() {
   const [tone, setTone] = useState<"success" | "error">("success");
   const [loading, setLoading] = useState("");
   const [completedOrderId, setCompletedOrderId] = useState<string | null>(null);
+  const [balanceWarning, setBalanceWarning] = useState("");
+  const balanceWarningTimer = useRef<number | null>(null);
 
   const load = () => api<{ user: User; transactions: Transaction[]; orders: Order[] }>("/customer/overview")
     .then((result) => setOrders(result.orders));
 
   useEffect(() => { load(); }, []);
+  useEffect(() => () => {
+    if (balanceWarningTimer.current !== null) window.clearTimeout(balanceWarningTimer.current);
+  }, []);
 
   const active = orders.find((order) => !["DELIVERED", "REJECTED"].includes(order.status));
   const completedOrder = completedOrderId ? orders.find((order) => order.id === completedOrderId && order.status === "DELIVERED") : undefined;
@@ -40,6 +45,15 @@ export default function OrdersPage() {
   const balanceShortfall = active ? Math.max(0, requiredBalance - (user?.balance ?? 0)) : 0;
   const hasBalanceShortfall = assigned && balanceShortfall > 0;
   const completedTasks = user?.totalOrders ?? 0;
+
+  const showTemporaryBalanceWarning = (warning: string) => {
+    if (balanceWarningTimer.current !== null) window.clearTimeout(balanceWarningTimer.current);
+    setBalanceWarning(warning);
+    balanceWarningTimer.current = window.setTimeout(() => {
+      setBalanceWarning("");
+      balanceWarningTimer.current = null;
+    }, 3000);
+  };
 
   const act = async (action: string) => {
     if (!active) return;
@@ -54,11 +68,24 @@ export default function OrdersPage() {
         ? `Task completed. ${money(active.commission)} commission and a ${money(result.milestoneReward.amount)} milestone reward were added.`
         : `Task completed. A ${money(active.commission)} commission was added.`);
     } catch (error) {
-      setTone("error");
-      setMessage(error instanceof Error ? error.message : "Action failed.");
+      const errorMessage = error instanceof Error ? error.message : "Action failed.";
+      if (action === "accept" && /insufficient balance|top up/i.test(errorMessage)) {
+        showTemporaryBalanceWarning(errorMessage);
+      } else {
+        setTone("error");
+        setMessage(errorMessage);
+      }
     } finally {
       setLoading("");
     }
+  };
+
+  const submitTask = () => {
+    if (hasBalanceShortfall) {
+      showTemporaryBalanceWarning(`Your balance is short by ${money(balanceShortfall)}. Add sufficient balance before submitting this task.`);
+      return;
+    }
+    void act("accept");
   };
 
   const refreshOrder = async () => {
@@ -162,35 +189,31 @@ export default function OrdersPage() {
                 <div className="mt-5 grid gap-3 rounded-3xl border border-slate-200 bg-slate-50 p-5 text-sm sm:text-base">
                   <SummaryRow label="Your balance" value={money(user?.balance ?? 0)} />
                   <SummaryRow label="Order price" value={money(active.totalValue)} />
-                  {hasBalanceShortfall && <SummaryRow label="Balance shortfall" value={money(balanceShortfall)} orange />}
                   <SummaryRow label="Commission earned" value={`+${money(active.commission)}`} accent />
                 </div>
                 {active.requiresCustomerApproval && (
                   <p className="mt-4 rounded-2xl bg-amber-50 px-4 py-3 text-sm font-bold text-amber-800">The administrator updated this assigned product. Review it before submitting.</p>
                 )}
-                {hasBalanceShortfall ? (
+                {balanceWarning && (
                   <div className="mt-5 rounded-3xl border border-orange-200 bg-orange-50 p-4 sm:p-5">
                     <div className="flex items-start gap-3">
                       <span className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-white text-shopee-500 shadow-sm"><AlertTriangle size={21} /></span>
                       <div>
-                        <p className="font-black text-slate-900">Top up before submitting this task</p>
-                        <p className="mt-1 text-sm font-semibold leading-6 text-slate-600">Your balance is short by <strong className="text-shopee-600">{money(balanceShortfall)}</strong>. The task will remain active until your approved balance covers the order price.</p>
+                        <p className="font-black text-slate-900">Insufficient balance</p>
+                        <p className="mt-1 text-sm font-semibold leading-6 text-slate-600">{balanceWarning}</p>
                       </div>
                     </div>
-                    <Link to={`/finance?tab=topup&amount=${balanceShortfall}`} className="mt-4 inline-flex h-14 w-full items-center justify-center rounded-2xl bg-shopee-500 px-6 text-base font-black text-white shadow-lg shadow-shopee-500/20 transition hover:bg-shopee-600">Top Up {money(balanceShortfall)}</Link>
-                    <button type="button" disabled className="mt-2 inline-flex h-11 w-full cursor-not-allowed items-center justify-center rounded-2xl bg-slate-200 px-5 text-sm font-black text-slate-500">Submit Task — Balance Required</button>
                   </div>
-                ) : (
-                  <button
-                    type="button"
-                    disabled={loading === "accept"}
-                    onClick={() => act("accept")}
-                    style={{ backgroundColor: "#ee4d2d", color: "#ffffff", boxShadow: "0 12px 26px rgba(238, 77, 45, 0.26)" }}
-                    className="mt-5 inline-flex h-14 w-full items-center justify-center rounded-2xl px-6 text-base font-black transition hover:brightness-95 disabled:cursor-not-allowed disabled:opacity-60"
-                  >
-                    {loading === "accept" ? "Submitting…" : "Submit Task"}
-                  </button>
                 )}
+                <button
+                  type="button"
+                  disabled={loading === "accept"}
+                  onClick={submitTask}
+                  style={{ backgroundColor: "#ee4d2d", color: "#ffffff", boxShadow: "0 12px 26px rgba(238, 77, 45, 0.26)" }}
+                  className="mt-5 inline-flex h-14 w-full items-center justify-center rounded-2xl px-6 text-base font-black transition hover:brightness-95 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {loading === "accept" ? "Submitting…" : "Submit Task"}
+                </button>
               </>
             )}
           </Card>
