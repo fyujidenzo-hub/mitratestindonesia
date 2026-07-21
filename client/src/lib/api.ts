@@ -4,10 +4,17 @@ export class ApiError extends Error {
   }
 }
 
+// Defaults to the same-origin API for Render's combined deployment. Set
+// VITE_API_URL to the full API base (for example, https://api.example.com/api)
+// when the React site is hosted separately, such as on Hostinger.
+const apiBaseUrl = (import.meta.env.VITE_API_URL || "/api").replace(/\/+$/, "");
+
+export const apiUrl = (path: string) => `${apiBaseUrl}${path.startsWith("/") ? path : `/${path}`}`;
+
 export async function api<T>(path: string, options: RequestInit = {}): Promise<T> {
   let response: Response;
   try {
-    response = await fetch(`/api${path}`, {
+    response = await fetch(apiUrl(path), {
       credentials: "include",
       ...options,
       headers: {

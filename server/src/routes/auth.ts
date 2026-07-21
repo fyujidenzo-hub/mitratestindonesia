@@ -40,7 +40,9 @@ function publicUser(user: Record<string, unknown>) {
 const sessionCookieOptions = {
   httpOnly: true,
   secure: process.env.NODE_ENV === "production",
-  sameSite: "lax" as const,
+  // The Hostinger frontend and Render API are different sites. Production
+  // sessions therefore need an explicitly cross-site, secure cookie.
+  sameSite: process.env.NODE_ENV === "production" ? ("none" as const) : ("lax" as const),
   path: "/",
 };
 
