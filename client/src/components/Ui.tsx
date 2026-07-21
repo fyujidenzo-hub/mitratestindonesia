@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import { AlertCircle, CheckCircle2, LoaderCircle, X } from "lucide-react";
+import { useI18n } from "../lib/i18n";
 
 export const inputClass = "h-12 w-full rounded-2xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-shopee-400 focus:ring-4 focus:ring-shopee-100 disabled:bg-slate-100";
 
@@ -28,7 +29,10 @@ export function Card({ children, className = "" }: { children: ReactNode; classN
 }
 
 export function StatusPill({ status }: { status: string }) {
+  const { t } = useI18n();
   const key = status.toUpperCase();
   const style = key.includes("APPROVED") || key.includes("DELIVERED") ? "bg-emerald-50 text-emerald-700" : key.includes("REJECTED") ? "bg-rose-50 text-rose-700" : key.includes("ASSIGNED") ? "bg-sky-50 text-sky-700" : "bg-amber-50 text-amber-700";
-  return <span className={`inline-flex rounded-full px-2.5 py-1 text-[11px] font-black uppercase tracking-wide ${style}`}>{status.replaceAll("_", " ")}</span>;
+  const label = status.replaceAll("_", " ");
+  const translated = t(label === "DELIVERED" ? "Completed" : label === "PRODUCT ASSIGNED" ? "Assigned product" : label);
+  return <span className={`inline-flex rounded-full px-2.5 py-1 text-[11px] font-black uppercase tracking-wide ${style}`}>{translated}</span>;
 }

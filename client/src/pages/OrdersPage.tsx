@@ -6,6 +6,7 @@ import { Card, Notice, StatusPill } from "../components/Ui";
 import { api, dateTime, money } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { rewardMilestones, rewardTaskGoal } from "../lib/rewards";
+import { useI18n } from "../lib/i18n";
 import type { Order, Transaction, User } from "../types";
 
 const stepOrder = ["WAITING_ASSIGNMENT", "PRODUCT_ASSIGNED", "DELIVERED"];
@@ -21,6 +22,7 @@ const assignedStatuses = ["PRODUCT_ASSIGNED", "WAITING_SHIPMENT", "PENDING_DELIV
 
 export default function OrdersPage() {
   const { user, refresh } = useAuth();
+  const { t } = useI18n();
   const [orders, setOrders] = useState<Order[]>([]);
   const [message, setMessage] = useState("");
   const [tone, setTone] = useState<"success" | "error">("success");
@@ -105,9 +107,9 @@ export default function OrdersPage() {
     <CustomerShell>
       <main className="mx-auto max-w-5xl px-4 py-6 sm:px-6 sm:py-8">
         <div>
-          <p className="text-xs font-black uppercase tracking-[.18em] text-shopee-500">Task center</p>
-          <h1 className="mt-1 text-3xl font-black tracking-tight text-slate-900">Your tasks & orders</h1>
-          <p className="mt-2 text-sm font-semibold text-slate-500">Review assigned products and submit completed order tasks.</p>
+          <p className="text-xs font-black uppercase tracking-[.18em] text-shopee-500">{t("Task center")}</p>
+          <h1 className="mt-1 text-3xl font-black tracking-tight text-slate-900">{t("Your tasks & orders")}</h1>
+          <p className="mt-2 text-sm font-semibold text-slate-500">{t("Review assigned products and submit completed order tasks.")}</p>
         </div>
 
         {message && <div className="mt-5"><Notice message={message} tone={tone} onClose={() => setMessage("")} /></div>}
@@ -118,7 +120,7 @@ export default function OrdersPage() {
           <Card className="mt-6 overflow-hidden p-4 sm:p-7">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
-                <p className="text-xs font-black uppercase tracking-[.16em] text-shopee-500">{assigned ? "Assigned product" : "Waiting for order task"}</p>
+                <p className="text-xs font-black uppercase tracking-[.16em] text-shopee-500">{assigned ? t("Assigned product") : t("Waiting for order task")}</p>
                 <p className="mt-1 text-xs font-bold text-slate-400">Order {active.referenceNumber}</p>
               </div>
               <StatusPill status={assigned ? "TASK ASSIGNED" : "ORDER NOT YET AVAILABLE"} />
@@ -152,11 +154,11 @@ export default function OrdersPage() {
                     )}
                   </div>
                   <div className="min-w-0">
-                    <p className="text-[11px] font-black uppercase tracking-[.15em] text-slate-400">Product</p>
+                    <p className="text-[11px] font-black uppercase tracking-[.15em] text-slate-400">{t("Product")}</p>
                     <h2 className="mt-1 text-xl font-black leading-snug text-slate-900">{activeItem.productName}</h2>
                     <p className="mt-1 text-sm font-bold text-slate-400">{activeItem.productCode} · {active.referenceNumber}</p>
                     <div className="mt-5">
-                      <p className="text-[11px] font-black uppercase tracking-[.15em] text-slate-400">Order price</p>
+                      <p className="text-[11px] font-black uppercase tracking-[.15em] text-slate-400">{t("Order price")}</p>
                       <p className="mt-1 text-2xl font-black text-slate-900">{money(active.totalValue)}</p>
                       <p className="mt-1 text-sm font-black text-emerald-600">Estimated commission {money(active.commission)}</p>
                     </div>
@@ -168,7 +170,7 @@ export default function OrdersPage() {
                 <div className="flex items-start gap-4">
                   <div className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-white text-amber-600 shadow-sm"><Clock3 size={22} /></div>
                   <div className="min-w-0 flex-1">
-                    <h2 className="text-lg font-black text-slate-900">Waiting for order task</h2>
+                    <h2 className="text-lg font-black text-slate-900">{t("Waiting for order task")}</h2>
                     <p className="mt-2 text-sm font-semibold leading-6 text-slate-600">Your order task has been picked up; please click refresh in the section below.</p>
                     <p className="mt-3 text-xs font-black uppercase tracking-wide text-amber-700">Status: Order not yet available</p>
                     <button
@@ -177,7 +179,7 @@ export default function OrdersPage() {
                       disabled={loading === "refresh"}
                       className="mt-4 inline-flex h-11 min-w-28 items-center justify-center rounded-2xl bg-shopee-500 px-5 text-sm font-black text-white shadow-lg shadow-shopee-500/20 transition hover:bg-shopee-600 disabled:cursor-not-allowed disabled:opacity-60"
                     >
-                      {loading === "refresh" ? "Refreshing…" : "Refresh"}
+                      {loading === "refresh" ? t("Refreshing…") : t("Refresh")}
                     </button>
                   </div>
                 </div>
@@ -187,9 +189,9 @@ export default function OrdersPage() {
             {assigned && (
               <>
                 <div className="mt-5 grid gap-3 rounded-3xl border border-slate-200 bg-slate-50 p-5 text-sm sm:text-base">
-                  <SummaryRow label="Your balance" value={money(user?.balance ?? 0)} />
-                  <SummaryRow label="Order price" value={money(active.totalValue)} />
-                  <SummaryRow label="Commission earned" value={`+${money(active.commission)}`} accent />
+                  <SummaryRow label={t("Your balance")} value={money(user?.balance ?? 0)} />
+                  <SummaryRow label={t("Order price")} value={money(active.totalValue)} />
+                  <SummaryRow label={t("Commission earned")} value={`+${money(active.commission)}`} accent />
                 </div>
                 {active.requiresCustomerApproval && (
                   <p className="mt-4 rounded-2xl bg-amber-50 px-4 py-3 text-sm font-bold text-amber-800">The administrator updated this assigned product. Review it before submitting.</p>
@@ -212,7 +214,7 @@ export default function OrdersPage() {
                   style={{ backgroundColor: "#ee4d2d", color: "#ffffff", boxShadow: "0 12px 26px rgba(238, 77, 45, 0.26)" }}
                   className="mt-5 inline-flex h-14 w-full items-center justify-center rounded-2xl px-6 text-base font-black transition hover:brightness-95 disabled:cursor-not-allowed disabled:opacity-60"
                 >
-                  {loading === "accept" ? "Submitting…" : "Submit Task"}
+                  {loading === "accept" ? t("Submitting…") : t("Submit Task")}
                 </button>
               </>
             )}
@@ -220,7 +222,7 @@ export default function OrdersPage() {
         ) : (
           <Card className="mt-6 grid place-items-center p-10 text-center">
             <div className="grid h-16 w-16 place-items-center rounded-3xl bg-shopee-50 text-shopee-500"><ShoppingBag size={30} /></div>
-            <h2 className="mt-5 text-xl font-black">No active tasks yet</h2>
+            <h2 className="mt-5 text-xl font-black">{t("No active tasks yet")}</h2>
             <p className="mt-2 max-w-md text-sm font-semibold leading-6 text-slate-500">Select a product or accept a new task from the lightning Task Center.</p>
             <Link to="/task-center" className="mt-5 inline-flex h-11 items-center gap-2 rounded-2xl bg-shopee-500 px-5 text-sm font-black text-white"><Zap size={17} fill="currentColor" /> Open task center</Link>
           </Card>
@@ -229,7 +231,7 @@ export default function OrdersPage() {
         <TaskRewardProgress completedTasks={completedTasks} />
 
         <section className="mt-8">
-          <h2 className="text-xl font-black text-slate-900">Order history</h2>
+          <h2 className="text-xl font-black text-slate-900">{t("Order history")}</h2>
           <div className="mt-4 grid gap-3">
             {orders.filter((order) => order.id !== active?.id && order.id !== completedOrder?.id).map((order) => (
               <Card key={order.id} className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center">

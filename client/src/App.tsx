@@ -12,9 +12,10 @@ import SupportPage from "./pages/SupportPage";
 import SecurityPage from "./pages/SecurityPage";
 import HistoryPage from "./pages/HistoryPage";
 import AdminPage from "./pages/AdminPage";
+import { I18nProvider } from "./lib/i18n";
 
 export default function App() {
-  return <BrowserRouter><AuthProvider><Routes><Route path="/login" element={<LoginPage />} /><Route path="/register" element={<RegisterPage />} /><Route element={<ProtectedRoute roles={["CUSTOMER"]} />}><Route path="/" element={<CustomerHomePage />} /><Route path="/task-center" element={<TaskCenterPage />} /><Route path="/orders" element={<OrdersPage />} /><Route path="/history" element={<HistoryPage />} /><Route path="/finance" element={<FinancePage />} /><Route path="/profile" element={<ProfilePage />} /><Route path="/security/password" element={<SecurityPage mode="account" />} /><Route path="/security/withdrawal" element={<SecurityPage mode="withdrawal" />} /><Route path="/support" element={<SupportPage />} /></Route><Route path="/admin" element={<AdminEntry />} /><Route path="*" element={<Navigate to="/" replace />} /></Routes></AuthProvider></BrowserRouter>;
+  return <I18nProvider><BrowserRouter><AuthProvider><Routes><Route path="/login" element={<LoginPage />} /><Route path="/register" element={<RegisterPage />} /><Route element={<ProtectedRoute roles={["CUSTOMER"]} />}><Route path="/" element={<CustomerHomePage />} /><Route path="/task-center" element={<TaskCenterPage />} /><Route path="/orders" element={<OrdersPage />} /><Route path="/history" element={<HistoryPage />} /><Route path="/finance" element={<FinancePage />} /><Route path="/profile" element={<ProfilePage />} /><Route path="/security/password" element={<SecurityPage mode="account" />} /><Route path="/security/withdrawal" element={<SecurityPage mode="withdrawal" />} /><Route path="/support" element={<SupportPage />} /></Route><Route path="/admin" element={<AdminEntry />} /><Route path="*" element={<Navigate to="/" replace />} /></Routes></AuthProvider></BrowserRouter></I18nProvider>;
 }
 
 function AdminEntry() {

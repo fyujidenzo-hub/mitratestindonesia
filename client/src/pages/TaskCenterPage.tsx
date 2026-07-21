@@ -8,12 +8,14 @@ import { api, money } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { membershipLabel } from "../lib/commission";
 import { useBootstrap } from "../lib/useBootstrap";
+import { useI18n } from "../lib/i18n";
 import type { Order, Transaction, User } from "../types";
 
 type Overview = { user: User; transactions: Transaction[]; orders: Order[] };
 
 export default function TaskCenterPage() {
   const { user } = useAuth();
+  const { t } = useI18n();
   const { data, loading: bootstrapLoading } = useBootstrap();
   const [overview, setOverview] = useState<Overview | null>(null);
   const [search, setSearch] = useState("");
@@ -62,14 +64,14 @@ export default function TaskCenterPage() {
             <div className="relative grid h-12 w-12 place-items-center rounded-2xl bg-white text-shopee-500"><ClipboardCheck /></div>
             <p className="relative mt-5 text-2xl font-black sm:text-3xl">{membershipLabel(currentUser?.level ?? "STARTER")}</p>
             <div className="relative mt-4 h-2 overflow-hidden rounded-full bg-white/30"><span className="block h-full rounded-full bg-amber-300" style={{ width: `${Math.max(progress, 8)}%` }} /></div>
-            <p className="relative mt-3 text-xs font-bold text-white/75">{completed} tasks completed</p>
-            <div className="relative mt-4 rounded-2xl bg-white/15 p-3 text-[11px] font-black backdrop-blur"><Star size={15} className="mr-1 inline text-amber-300" fill="currentColor" /> Complete your next task to level up.</div>
+            <p className="relative mt-3 text-xs font-bold text-white/75">{completed} {t("tasks completed")}</p>
+            <div className="relative mt-4 rounded-2xl bg-white/15 p-3 text-[11px] font-black backdrop-blur"><Star size={15} className="mr-1 inline text-amber-300" fill="currentColor" /> {t("Complete your next task to level up.")}</div>
           </Card>
 
           <Card className="col-span-2 order-3 border-0 p-5 shadow-card sm:p-6 xl:order-none xl:col-span-1">
             <div className="grid gap-4 sm:grid-cols-2 sm:gap-0 sm:divide-x sm:divide-slate-100">
-              <div className="flex items-center gap-4 sm:pr-6"><span className="grid h-12 w-12 shrink-0 place-items-center rounded-2xl bg-orange-50 text-shopee-500"><Coins /></span><div><p className="text-xs font-black uppercase tracking-wide text-slate-400">Total commission</p><p className="mt-1 text-xl font-black text-shopee-500">{money(totalCommission)}</p><p className="mt-1 text-[11px] font-semibold text-slate-400">Credited after completed orders</p></div></div>
-              <div className="flex items-center gap-4 border-t border-slate-100 pt-4 sm:border-t-0 sm:pl-6 sm:pt-0"><span className="grid h-12 w-12 shrink-0 place-items-center rounded-2xl bg-emerald-50 text-emerald-600"><WalletCards /></span><div><p className="text-xs font-black uppercase tracking-wide text-slate-400">Account balance</p><p className="mt-1 text-xl font-black text-slate-900">{money(currentUser?.balance ?? 0)}</p><div className="mt-1 flex gap-3 text-[11px] font-black"><Link to="/finance?tab=topup" className="text-shopee-500">Top up</Link><Link to="/finance?tab=withdraw" className="text-emerald-600">Withdraw</Link></div></div></div>
+              <div className="flex items-center gap-4 sm:pr-6"><span className="grid h-12 w-12 shrink-0 place-items-center rounded-2xl bg-orange-50 text-shopee-500"><Coins /></span><div><p className="text-xs font-black uppercase tracking-wide text-slate-400">{t("Total commission")}</p><p className="mt-1 text-xl font-black text-shopee-500">{money(totalCommission)}</p><p className="mt-1 text-[11px] font-semibold text-slate-400">{t("Credited after completed orders")}</p></div></div>
+              <div className="flex items-center gap-4 border-t border-slate-100 pt-4 sm:border-t-0 sm:pl-6 sm:pt-0"><span className="grid h-12 w-12 shrink-0 place-items-center rounded-2xl bg-emerald-50 text-emerald-600"><WalletCards /></span><div><p className="text-xs font-black uppercase tracking-wide text-slate-400">{t("Account balance")}</p><p className="mt-1 text-xl font-black text-slate-900">{money(currentUser?.balance ?? 0)}</p><div className="mt-1 flex gap-3 text-[11px] font-black"><Link to="/finance?tab=topup" className="text-shopee-500">{t("Top up")}</Link><Link to="/finance?tab=withdraw" className="text-emerald-600">{t("Withdraw")}</Link></div></div></div>
             </div>
             <Button loading={accepting} onClick={acceptTask} className="mt-5 h-[52px] w-full text-base"><Zap size={20} fill="currentColor" /> {activeOrder ? "Continue Active Order" : "Accept an Order"}</Button>
           </Card>
@@ -77,7 +79,7 @@ export default function TaskCenterPage() {
           <Card className="relative overflow-hidden border-orange-100 p-5 text-center shadow-card sm:p-6">
             <div className="mx-auto grid h-12 w-12 place-items-center rounded-2xl bg-shopee-50 text-shopee-500"><Target /></div>
             <p className="mt-4 text-3xl font-black text-shopee-500">{progress}%</p>
-            <p className="mt-1 text-xs font-black text-slate-500">Task goal progress</p>
+            <p className="mt-1 text-xs font-black text-slate-500">{t("Task goal progress")}</p>
             <p className="mt-3 text-2xl font-black text-slate-900">{completed}<span className="text-sm text-slate-400"> / {taskGoal}</span></p>
             <div className="mt-4 rounded-2xl bg-orange-50 px-3 py-2 text-[11px] font-black text-shopee-600">You've got this! <Heart size={14} className="ml-1 inline" fill="currentColor" /></div>
           </Card>

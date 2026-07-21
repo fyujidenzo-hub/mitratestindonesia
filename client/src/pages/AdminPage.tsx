@@ -5,6 +5,7 @@ import { Brand } from "../components/Brand";
 import { Button, Card, Field, inputClass, Notice, StatusPill } from "../components/Ui";
 import { api, dateTime, money } from "../lib/api";
 import { useAuth } from "../lib/auth";
+import { LanguageSwitcher, translateText, useI18n, type Language } from "../lib/i18n";
 import { calculateCommission, commissionPercent, membershipLabel } from "../lib/commission";
 import type { Bank, CatalogBanner, CatalogProduct, Order, Product, Transaction, User, UserLevel } from "../types";
 
@@ -16,6 +17,9 @@ const tabs: Array<{ key: Tab; label: string; icon: typeof LayoutDashboard; super
 
 export default function AdminPage() {
   const { user, logout } = useAuth(); const navigate = useNavigate();
+  const { t, language } = useI18n();
+  const adminRootRef = useRef<HTMLDivElement>(null);
+  useAdminTextTranslation(adminRootRef, language);
   const [data, setData] = useState<AdminData | null>(null); const [tab, setTab] = useState<Tab>("overview"); const [query, setQuery] = useState(""); const [menuOpen, setMenuOpen] = useState(false); const [message, setMessage] = useState(""); const [tone, setTone] = useState<"success" | "error">("success"); const [refreshing, setRefreshing] = useState(false);
   const load = async () => { setRefreshing(true); try { setData(await api<AdminData>("/admin/overview")); } finally { setRefreshing(false); } };
   useEffect(() => { load(); }, []);
@@ -36,10 +40,10 @@ export default function AdminPage() {
   const pendingTasks = data?.orders.filter((item) => item.status === "WAITING_ASSIGNMENT").length ?? 0;
   const totalBalance = data?.members.reduce((sum, member) => sum + member.balance, 0) ?? 0;
 
-  return <div className="min-h-screen bg-[#f4f5f7] text-slate-900"><header className="sticky top-0 z-40 border-b border-slate-200 bg-white/95 backdrop-blur"><div className="flex h-16 items-center gap-3 px-4 lg:px-6"><button aria-label="Open navigation" className="grid h-10 w-10 place-items-center rounded-xl bg-slate-100 lg:hidden" onClick={() => setMenuOpen(true)}><Menu /></button><Brand compact /><div className="relative ml-auto hidden w-full max-w-md md:block"><Search size={17} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" /><input value={query} onChange={(e) => setQuery(e.target.value)} className="h-10 w-full rounded-xl border border-slate-200 bg-slate-50 pl-10 pr-4 text-sm font-semibold outline-none focus:border-shopee-300" placeholder="Search members, orders, and transactions" /></div><div className="ml-auto flex items-center gap-3 md:ml-0"><div className="hidden text-right sm:block"><p className="text-sm font-black">{user?.displayName}</p><p className="text-[10px] font-black uppercase tracking-wide text-shopee-500">{user?.role.replace("_", " ")}</p></div><button aria-label="Sign out" onClick={async () => { await logout("admin"); navigate("/admin"); }} className="grid h-10 w-10 place-items-center rounded-xl bg-slate-100 text-slate-600 hover:bg-rose-50 hover:text-rose-600"><LogOut size={18} /></button></div></div></header>
-    <div className="flex"><aside className={`${menuOpen ? "fixed inset-0 z-50 flex" : "hidden"} w-full bg-slate-950/50 lg:sticky lg:top-16 lg:flex lg:h-[calc(100vh-4rem)] lg:w-64 lg:bg-transparent`}><div className="h-full w-72 bg-slate-950 p-4 text-white lg:w-full"><div className="mb-5 flex items-center justify-between lg:hidden"><Brand inverse compact /><button aria-label="Close navigation" onClick={() => setMenuOpen(false)}><X /></button></div><nav className="grid gap-1.5">{visibleTabs.map(({ key, label, icon: Icon }) => <button key={key} onClick={() => { setTab(key); setMenuOpen(false); }} className={`flex items-center gap-3 rounded-2xl px-4 py-3 text-left text-sm font-black transition ${tab === key ? "bg-gradient-to-r from-shopee-500 to-orange-500 text-white shadow-lg" : "text-slate-400 hover:bg-white/5 hover:text-white"}`}><Icon size={19} />{label}<ChevronRight size={15} className="ml-auto opacity-40" /></button>)}</nav><div className="mt-6 rounded-2xl border border-white/10 bg-white/5 p-4"><p className="text-[10px] font-black uppercase tracking-[.16em] text-slate-500">Invitation code</p><p className="mt-2 text-xl font-black text-white">{user?.invitationCode || "-"}</p><p className="mt-1 text-xs font-semibold text-slate-500">Bonus {money(user?.registrationBonus ?? 0)}</p></div></div><button aria-label="Close navigation overlay" className="flex-1 lg:hidden" onClick={() => setMenuOpen(false)} /></aside>
-      <main className="min-w-0 flex-1 p-4 sm:p-6 lg:p-8"><div className="mx-auto max-w-[1680px]"><div className="flex flex-wrap items-center justify-between gap-4"><div><p className="text-xs font-black uppercase tracking-[.18em] text-shopee-500">Admin command center</p><h1 className="mt-1 text-2xl font-black tracking-tight sm:text-3xl">{visibleTabs.find((item) => item.key === tab)?.label}</h1></div><Button variant="ghost" loading={refreshing} onClick={load}><RefreshCw size={17} /> Refresh data</Button></div>{message && <div className="mt-5"><Notice message={message} tone={tone} onClose={() => setMessage("")} /></div>}
-        <div className="relative mt-5 md:hidden"><Search size={17} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" /><input value={query} onChange={(e) => setQuery(e.target.value)} className={`${inputClass} pl-10`} placeholder="Search data" /></div>
+  return <div ref={adminRootRef} className="min-h-screen bg-[#f4f5f7] text-slate-900"><header className="sticky top-0 z-40 border-b border-slate-200 bg-white/95 backdrop-blur"><div className="flex h-16 items-center gap-3 px-4 lg:px-6"><button aria-label="Open navigation" className="grid h-10 w-10 place-items-center rounded-xl bg-slate-100 lg:hidden" onClick={() => setMenuOpen(true)}><Menu /></button><Brand compact /><div className="relative ml-auto hidden w-full max-w-md md:block"><Search size={17} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" /><input value={query} onChange={(e) => setQuery(e.target.value)} className="h-10 w-full rounded-xl border border-slate-200 bg-slate-50 pl-10 pr-4 text-sm font-semibold outline-none focus:border-shopee-300" placeholder={t("Search members, orders, and transactions")} /></div><div className="ml-auto flex items-center gap-3 md:ml-0"><LanguageSwitcher compact /><div className="hidden text-right sm:block"><p className="text-sm font-black">{user?.displayName}</p><p className="text-[10px] font-black uppercase tracking-wide text-shopee-500">{user?.role.replace("_", " ")}</p></div><button aria-label={t("Sign out")} onClick={async () => { await logout("admin"); navigate("/admin"); }} className="grid h-10 w-10 place-items-center rounded-xl bg-slate-100 text-slate-600 hover:bg-rose-50 hover:text-rose-600"><LogOut size={18} /></button></div></div></header>
+    <div className="flex"><aside className={`${menuOpen ? "fixed inset-0 z-50 flex" : "hidden"} w-full bg-slate-950/50 lg:sticky lg:top-16 lg:flex lg:h-[calc(100vh-4rem)] lg:w-64 lg:bg-transparent`}><div className="h-full w-72 bg-slate-950 p-4 text-white lg:w-full"><div className="mb-5 flex items-center justify-between lg:hidden"><Brand inverse compact /><button aria-label="Close navigation" onClick={() => setMenuOpen(false)}><X /></button></div><nav className="grid gap-1.5">{visibleTabs.map(({ key, label, icon: Icon }) => <button key={key} onClick={() => { setTab(key); setMenuOpen(false); }} className={`flex items-center gap-3 rounded-2xl px-4 py-3 text-left text-sm font-black transition ${tab === key ? "bg-gradient-to-r from-shopee-500 to-orange-500 text-white shadow-lg" : "text-slate-400 hover:bg-white/5 hover:text-white"}`}><Icon size={19} />{t(label)}<ChevronRight size={15} className="ml-auto opacity-40" /></button>)}</nav><div className="mt-6 rounded-2xl border border-white/10 bg-white/5 p-4"><p className="text-[10px] font-black uppercase tracking-[.16em] text-slate-500">{t("Invitation code")}</p><p className="mt-2 text-xl font-black text-white">{user?.invitationCode || "-"}</p><p className="mt-1 text-xs font-semibold text-slate-500">Bonus {money(user?.registrationBonus ?? 0)}</p></div></div><button aria-label="Close navigation overlay" className="flex-1 lg:hidden" onClick={() => setMenuOpen(false)} /></aside>
+      <main className="min-w-0 flex-1 p-4 sm:p-6 lg:p-8"><div className="mx-auto max-w-[1680px]"><div className="flex flex-wrap items-center justify-between gap-4"><div><p className="text-xs font-black uppercase tracking-[.18em] text-shopee-500">Admin command center</p><h1 className="mt-1 text-2xl font-black tracking-tight sm:text-3xl">{t(visibleTabs.find((item) => item.key === tab)?.label ?? "Overview")}</h1></div><Button variant="ghost" loading={refreshing} onClick={load}><RefreshCw size={17} /> {t("Refresh data")}</Button></div>{message && <div className="mt-5"><Notice message={message} tone={tone} onClose={() => setMessage("")} /></div>}
+        <div className="relative mt-5 md:hidden"><Search size={17} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" /><input value={query} onChange={(e) => setQuery(e.target.value)} className={`${inputClass} pl-10`} placeholder={t("Search data")} /></div>
         {tab === "overview" && <Overview members={data?.members.length ?? 0} totalBalance={totalBalance} pendingTopups={pendingTopups} pendingWithdrawals={pendingWithdrawals} pendingTasks={pendingTasks} transactions={data?.transactions ?? []} orders={data?.orders ?? []} />}
         {tab === "members" && <Members members={filteredMembers} orders={data?.orders ?? []} canManage={user?.role === "SUPER_ADMIN"} canManageSecurity={user?.role === "SUPER_ADMIN" || user?.role === "ADMIN"} canManageWithdrawals={user?.role === "SUPER_ADMIN" || user?.role === "ADMIN"} perform={perform} />}
         {tab === "tasks" && <Tasks orders={filteredOrders} products={data?.taskProducts ?? []} perform={perform} />}
@@ -51,6 +55,65 @@ export default function AdminPage() {
       </div></main>
     </div>
   </div>;
+}
+
+function useAdminTextTranslation(rootRef: React.RefObject<HTMLDivElement | null>, language: Language) {
+  const textOriginals = useRef(new WeakMap<Text, string>());
+  const attributeOriginals = useRef(new WeakMap<HTMLElement, Record<string, string>>());
+
+  useEffect(() => {
+    const root = rootRef.current;
+    if (!root) return;
+
+    const translateNode = (node: Text) => {
+      const original = textOriginals.current.get(node) ?? node.nodeValue ?? "";
+      textOriginals.current.set(node, original);
+      const match = original.match(/^(\s*)(.*?)(\s*)$/s);
+      const next = match ? `${match[1]}${translateText(language, match[2])}${match[3]}` : translateText(language, original);
+      if (node.nodeValue !== next) node.nodeValue = next;
+    };
+
+    const translateElement = (element: HTMLElement) => {
+      ["aria-label", "placeholder", "title"].forEach((attribute) => {
+        const current = element.getAttribute(attribute);
+        if (current === null) return;
+        const saved = attributeOriginals.current.get(element) ?? {};
+        if (!(attribute in saved)) {
+          saved[attribute] = current;
+          attributeOriginals.current.set(element, saved);
+        }
+        const next = translateText(language, saved[attribute]);
+        if (current !== next) element.setAttribute(attribute, next);
+      });
+    };
+
+    const translateTree = (scope: Node) => {
+      if (scope instanceof Text) {
+        translateNode(scope);
+        return;
+      }
+      if (scope instanceof HTMLElement) {
+        translateElement(scope);
+        scope.querySelectorAll<HTMLElement>("*").forEach(translateElement);
+      }
+      const walker = document.createTreeWalker(scope, NodeFilter.SHOW_TEXT);
+      let node = walker.nextNode();
+      while (node) {
+        translateNode(node as Text);
+        node = walker.nextNode();
+      }
+    };
+
+    translateTree(root);
+    const observer = new MutationObserver((records) => {
+      records.forEach((record) => {
+        if (record.type === "characterData") translateNode(record.target as Text);
+        record.addedNodes.forEach(translateTree);
+      });
+    });
+    observer.observe(root, { childList: true, characterData: true, subtree: true });
+    return () => observer.disconnect();
+  }, [language, rootRef]);
 }
 
 function Overview({ members, totalBalance, pendingTopups, pendingWithdrawals, pendingTasks, transactions, orders }: { members: number; totalBalance: number; pendingTopups: number; pendingWithdrawals: number; pendingTasks: number; transactions: Transaction[]; orders: Order[] }) {

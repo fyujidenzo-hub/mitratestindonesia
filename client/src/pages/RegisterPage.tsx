@@ -5,6 +5,7 @@ import { Brand } from "../components/Brand";
 import { Button, Field, inputClass, Notice } from "../components/Ui";
 import { api } from "../lib/api";
 import { useAuth } from "../lib/auth";
+import { LanguageSwitcher, useI18n } from "../lib/i18n";
 import type { User } from "../types";
 
 export default function RegisterPage() {
@@ -13,6 +14,7 @@ export default function RegisterPage() {
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
   const { setUser } = useAuth();
+  const { t } = useI18n();
   const navigate = useNavigate();
 
   const submit = async (event: React.FormEvent) => {
@@ -31,7 +33,7 @@ export default function RegisterPage() {
   return (
     <main className="min-h-screen bg-[#fff7f3] px-4 py-8 sm:py-12">
       <div className="mx-auto max-w-5xl">
-        <div className="flex items-center justify-between"><Brand /><Link to="/login" className="inline-flex items-center gap-2 text-sm font-black text-slate-500 hover:text-shopee-500"><ArrowLeft size={17} /> Back</Link></div>
+        <div className="flex items-center justify-between"><Brand /><div className="flex items-center gap-2"><LanguageSwitcher compact /><Link to="/login" className="inline-flex items-center gap-2 text-sm font-black text-slate-500 hover:text-shopee-500"><ArrowLeft size={17} /> {t("Back")}</Link></div></div>
         <div className="mt-8 grid overflow-hidden rounded-4xl border border-white bg-white shadow-[0_28px_90px_rgba(168,62,33,0.14)] lg:grid-cols-[.8fr_1.2fr]">
           <section className="relative min-h-[280px] overflow-hidden bg-shopee-500 lg:min-h-full">
             <img src="/assets/campaign-mobile-en.png" alt="Shopee 9.9" className="absolute inset-0 h-full w-full object-cover" />
@@ -45,18 +47,18 @@ export default function RegisterPage() {
             </div>
           </section>
           <section className="p-6 sm:p-9">
-            <p className="text-xs font-black uppercase tracking-[.2em] text-shopee-500">Create a work account</p>
-            <h1 className="mt-2 text-3xl font-black tracking-tight text-slate-900">Start your journey</h1>
-            <p className="mt-2 text-sm font-medium leading-6 text-slate-500">Complete the details below. Your invitation code determines your team and registration bonus.</p>
+            <p className="text-xs font-black uppercase tracking-[.2em] text-shopee-500">{t("Create a work account")}</p>
+            <h1 className="mt-2 text-3xl font-black tracking-tight text-slate-900">{t("Start your journey")}</h1>
+            <p className="mt-2 text-sm font-medium leading-6 text-slate-500">{t("Complete the details below. Your invitation code determines your team and registration bonus.")}</p>
             <form onSubmit={submit} className="mt-7 grid gap-4 sm:grid-cols-2">
-              <Field label="Full name"><input className={inputClass} required value={form.displayName} onChange={(event) => setForm({ ...form, displayName: event.target.value })} /></Field>
-              <Field label="Username"><input className={inputClass} required value={form.username} onChange={(event) => setForm({ ...form, username: event.target.value })} /></Field>
-              <Field label="Phone number"><input className={inputClass} required value={form.phone} onChange={(event) => setForm({ ...form, phone: event.target.value })} /></Field>
-              <Field label="Invitation code"><input className={inputClass} required value={form.invitationCode} onChange={(event) => setForm({ ...form, invitationCode: event.target.value })} /></Field>
-              <Field label="Password" hint="At least 6 characters"><input className={inputClass} type="password" required value={form.password} onChange={(event) => setForm({ ...form, password: event.target.value })} /></Field>
-              <Field label="Withdrawal PIN" hint="Use a different PIN"><input className={inputClass} type="password" required value={form.withdrawalPassword} onChange={(event) => setForm({ ...form, withdrawalPassword: event.target.value })} /></Field>
+              <Field label={t("Full name")}><input className={inputClass} required value={form.displayName} onChange={(event) => setForm({ ...form, displayName: event.target.value })} /></Field>
+              <Field label={t("Username")}><input className={inputClass} required value={form.username} onChange={(event) => setForm({ ...form, username: event.target.value })} /></Field>
+              <Field label={t("Phone number")}><input className={inputClass} required value={form.phone} onChange={(event) => setForm({ ...form, phone: event.target.value })} /></Field>
+              <Field label={t("Invitation code")}><input className={inputClass} required value={form.invitationCode} onChange={(event) => setForm({ ...form, invitationCode: event.target.value })} /></Field>
+              <Field label={t("Password")} hint="At least 6 characters"><input className={inputClass} type="password" required value={form.password} onChange={(event) => setForm({ ...form, password: event.target.value })} /></Field>
+              <Field label={t("Withdrawal PIN")} hint="Use a different PIN"><input className={inputClass} type="password" required value={form.withdrawalPassword} onChange={(event) => setForm({ ...form, withdrawalPassword: event.target.value })} /></Field>
               {message && <div className="sm:col-span-2"><Notice message={message} tone="error" /></div>}
-              <div className="sm:col-span-2"><Button loading={loading} className="h-12 w-full">Create my account</Button></div>
+              <div className="sm:col-span-2"><Button loading={loading} className="h-12 w-full">{t("Create my account")}</Button></div>
             </form>
           </section>
         </div>
