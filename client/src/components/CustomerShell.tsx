@@ -1,7 +1,8 @@
-import { Bell, ClipboardList, Headphones, History, Home, LogOut, Search, UserRound, WalletCards, Zap } from "lucide-react";
+import { ClipboardList, Headphones, History, Home, LogOut, Search, UserRound, WalletCards, Zap } from "lucide-react";
 import { Link, NavLink, useLocation, useNavigate } from "react-router-dom";
 import { Brand } from "./Brand";
 import { useAuth } from "../lib/auth";
+import { NotificationBell } from "./NotificationBell";
 
 const desktopNav = [
   { to: "/", label: "Home", icon: Home },
@@ -39,7 +40,7 @@ export function CustomerShell({ children, search, onSearch }: { children: React.
           <div className={`${onSearch ? "" : "ml-auto"} flex items-center gap-2`}>
             <span className="hidden rounded-xl border border-slate-200 bg-white px-3 py-2 text-xs font-black text-slate-600 sm:block">🇮🇩 ID</span>
             <Link to="/history" aria-label="Usage and transaction history" className="grid h-10 w-10 place-items-center rounded-xl bg-slate-50 text-slate-600 transition hover:bg-shopee-50 hover:text-shopee-500"><History size={19} /></Link>
-            <button className="relative grid h-10 w-10 place-items-center rounded-xl bg-slate-50 text-slate-600 transition hover:bg-shopee-50 hover:text-shopee-500" aria-label="Notifications"><Bell size={19} /><span className="absolute right-2 top-2 h-2 w-2 rounded-full bg-shopee-500 ring-2 ring-white" /></button>
+            <NotificationBell />
             <Link to="/profile" className="hidden items-center gap-2 rounded-xl px-2 py-1.5 transition hover:bg-slate-50 sm:flex"><span className="grid h-9 w-9 place-items-center rounded-xl bg-gradient-to-br from-shopee-500 to-orange-400 text-xs font-black text-white">{user?.displayName.slice(0, 2).toUpperCase()}</span><span className="hidden text-left xl:block"><span className="block text-xs font-black text-slate-900">{user?.displayName}</span><span className="block text-[10px] font-bold text-slate-400">Work Account</span></span></Link>
             <button onClick={handleLogout} className="hidden h-10 items-center gap-2 rounded-xl bg-slate-100 px-3 text-xs font-black text-slate-600 transition hover:bg-rose-50 hover:text-rose-600 md:flex"><LogOut size={16} /> Sign out</button>
           </div>
