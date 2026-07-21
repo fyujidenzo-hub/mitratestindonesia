@@ -6,6 +6,7 @@ import { CustomerShell } from "../components/CustomerShell";
 import { Button, Card, Notice, StatusPill } from "../components/Ui";
 import { api, money } from "../lib/api";
 import { useAuth } from "../lib/auth";
+import { membershipLabel } from "../lib/commission";
 import { useBootstrap } from "../lib/useBootstrap";
 import type { Order, Transaction, User } from "../types";
 
@@ -59,7 +60,7 @@ export default function TaskCenterPage() {
           <Card className="relative overflow-hidden border-0 bg-gradient-to-br from-shopee-500 to-orange-500 p-5 text-white shadow-float sm:p-6">
             <div className="absolute -right-10 -top-12 h-32 w-32 rounded-full border-[22px] border-white/10" />
             <div className="relative grid h-12 w-12 place-items-center rounded-2xl bg-white text-shopee-500"><ClipboardCheck /></div>
-            <p className="relative mt-5 text-2xl font-black sm:text-3xl">{currentUser?.level || "STARTER"}</p>
+            <p className="relative mt-5 text-2xl font-black sm:text-3xl">{membershipLabel(currentUser?.level ?? "STARTER")}</p>
             <div className="relative mt-4 h-2 overflow-hidden rounded-full bg-white/30"><span className="block h-full rounded-full bg-amber-300" style={{ width: `${Math.max(progress, 8)}%` }} /></div>
             <p className="relative mt-3 text-xs font-bold text-white/75">{completed} tasks completed</p>
             <div className="relative mt-4 rounded-2xl bg-white/15 p-3 text-[11px] font-black backdrop-blur"><Star size={15} className="mr-1 inline text-amber-300" fill="currentColor" /> Complete your next task to level up.</div>

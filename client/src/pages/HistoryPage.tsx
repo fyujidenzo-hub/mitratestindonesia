@@ -4,15 +4,8 @@ import { CustomerShell } from "../components/CustomerShell";
 import { Card, StatusPill } from "../components/Ui";
 import { api, dateTime, money } from "../lib/api";
 import { useAuth } from "../lib/auth";
+import { rewardMilestones, rewardTaskGoal } from "../lib/rewards";
 import type { Order, Transaction, User } from "../types";
-
-const milestones = [
-  { task: 5, amount: 25_000 },
-  { task: 7, amount: 50_000 },
-  { task: 10, amount: 75_000 },
-  { task: 12, amount: 150_000 },
-  { task: 15, amount: 200_000 },
-];
 
 export default function HistoryPage() {
   const { user } = useAuth();
@@ -38,14 +31,14 @@ export default function HistoryPage() {
           </div>
           <div className="rounded-2xl bg-shopee-50 px-5 py-3 text-right ring-1 ring-shopee-100">
             <p className="text-[10px] font-black uppercase tracking-wide text-shopee-500">Tasks completed</p>
-            <p className="mt-1 text-2xl font-black text-slate-900">{completedTasks}<span className="text-sm text-slate-400"> / 15</span></p>
+            <p className="mt-1 text-2xl font-black text-slate-900">{completedTasks}<span className="text-sm text-slate-400"> / {rewardTaskGoal}</span></p>
           </div>
         </div>
 
         <section className="mt-6">
           <div className="flex items-center gap-3"><div className="grid h-11 w-11 place-items-center rounded-2xl bg-shopee-50 text-shopee-500"><Gift size={21} /></div><div><h2 className="font-black text-slate-900">Task reward milestones</h2><p className="text-xs font-semibold text-slate-400">Rewards are credited automatically when each target is reached.</p></div></div>
           <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
-            {milestones.map((milestone) => {
+            {rewardMilestones.map((milestone) => {
               const earned = completedTasks >= milestone.task;
               return <Card key={milestone.task} className={`p-4 ${earned ? "border-orange-200 bg-orange-50/30" : ""}`}><div className={`grid h-10 w-10 place-items-center rounded-2xl ${earned ? "bg-shopee-500 text-white" : "bg-slate-100 text-slate-400"}`}>{earned ? <CheckCircle2 size={19} /> : <LockKeyhole size={18} />}</div><p className="mt-4 text-xs font-black uppercase tracking-wide text-slate-400">Complete task {milestone.task}</p><p className={`mt-1 text-lg font-black ${earned ? "text-shopee-600" : "text-slate-700"}`}>{money(milestone.amount)}</p><p className="mt-2 text-[11px] font-bold text-slate-400">{earned ? "Reward earned" : `${Math.max(0, milestone.task - completedTasks)} tasks remaining`}</p></Card>;
             })}

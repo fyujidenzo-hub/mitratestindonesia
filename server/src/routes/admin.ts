@@ -4,6 +4,7 @@ import bcrypt from "bcryptjs";
 import { OrderStatus, TransactionStatus, TransactionType, UserLevel, UserRole } from "@prisma/client";
 import { z } from "zod";
 import { authenticateAdmin, type AuthRequest, requireRole } from "../middleware/auth.js";
+import { calculateCommission } from "../lib/commission.js";
 import { prisma } from "../lib/prisma.js";
 import { asyncHandler, HttpError, jsonSafe, requestNumber } from "../lib/http.js";
 
@@ -27,6 +28,13 @@ const catalogBannerInputSchema = z.object({
   imageUrl: z.string().trim().max(2000).refine((value) => value.startsWith("https://") || value.startsWith("/assets/"), "Use a secure https:// URL or a local /assets/ path."),
   sortOrder: z.number().int().min(0).max(10_000),
   active: z.boolean(),
+});
+
+const supportSettingsInputSchema = z.object({
+  supportUrl: z.string().trim().url().max(500).refine((value) => {
+    const hostname = new URL(value).hostname.toLowerCase();
+    return hostname === "t.me" || hostname === "telegram.me";
+  }, "Use a valid Telegram t.me link."),
 });
 
 const staffRoleSchema = z.enum([UserRole.ADMIN, UserRole.EMPLOYEE]);
@@ -96,10 +104,10 @@ router.get(
     const transactionFilter = scopedUserIds ? { userId: { in: scopedUserIds } } : {};
     const orderFilter = scopedUserIds ? { userId: { in: scopedUserIds } } : {};
 
-    const [members, transactions, orders, taskProducts, catalogProducts, catalogBanners, banks, staff] = await Promise.all([
+    const [members, transactions, orders, taskProducts, catalogProducts, catalogBanners, banks, staff, settings] = await Promise.all([
       prisma.user.findMany({ where: userFilter, select: { id: true, username: true, displayName: true, phone: true, balance: true, level: true, totalOrders: true, withdrawalLocked: true, withdrawalRemarks: true, isActive: true, createdAt: true, lastLoginAt: true, referrer: { select: { displayName: true, invitationCode: true } } }, orderBy: { createdAt: "desc" } }),
       prisma.transaction.findMany({ where: transactionFilter, include: { user: { select: { username: true, displayName: true } }, reviewer: { select: { displayName: true } } }, orderBy: { createdAt: "desc" }, take: 200 }),
-      prisma.order.findMany({ where: orderFilter, include: { user: { select: { username: true, displayName: true, balance: true, totalOrders: true } }, items: true }, orderBy: { createdAt: "desc" }, take: 200 }),
+      prisma.order.findMany({ where: orderFilter, include: { user: { select: { username: true, displayName: true, balance: true, totalOrders: true, level: true } }, items: true }, orderBy: { createdAt: "desc" }, take: 200 }),
       prisma.product.findMany({ orderBy: { createdAt: "desc" } }),
       prisma.catalogProduct.findMany({ orderBy: [{ price: "asc" }, { name: "asc" }] }),
       prisma.catalogBanner.findMany({ orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }] }),
@@ -107,8 +115,35 @@ router.get(
       request.auth!.role === UserRole.SUPER_ADMIN
         ? prisma.user.findMany({ where: { role: { in: staffRoles } }, select: staffSelect, orderBy: [{ isActive: "desc" }, { createdAt: "asc" }] })
         : Promise.resolve([]),
+      prisma.siteSetting.findMany(),
     ]);
-    response.json(jsonSafe({ members, transactions, orders, taskProducts, catalogProducts, catalogBanners, banks, staff }));
+    response.json(jsonSafe({ members, transactions, orders, taskProducts, catalogProducts, catalogBanners, banks, staff, settings: Object.fromEntries(settings.map((setting) => [setting.key, setting.value])) }));
+  }),
+);
+
+router.patch(
+  "/settings/support",
+  requireRole(UserRole.SUPER_ADMIN),
+  asyncHandler(async (request: AuthRequest, response) => {
+    const input = supportSettingsInputSchema.parse(request.body);
+    const setting = await prisma.$transaction(async (database) => {
+      const updated = await database.siteSetting.upsert({
+        where: { key: "supportUrl" },
+        create: { key: "supportUrl", value: input.supportUrl },
+        update: { value: input.supportUrl },
+      });
+      await database.auditLog.create({
+        data: {
+          actorId: request.auth!.id,
+          action: "SUPPORT_LINK_UPDATE",
+          entityType: "SiteSetting",
+          entityId: "supportUrl",
+          details: { supportUrl: input.supportUrl },
+        },
+      });
+      return updated;
+    });
+    response.json(jsonSafe({ setting }));
   }),
 );
 
@@ -273,17 +308,20 @@ router.post(
     const products = await prisma.product.findMany({ where: { id: { in: input.items.map((item) => item.productId) }, active: true } });
     if (products.length !== new Set(input.items.map((item) => item.productId)).size) throw new HttpError(400, "One or more products could not be found.");
 
-    const rows = input.items.map((item) => {
+    const selectedRows = input.items.map((item) => {
       const product = products.find((candidate) => candidate.id === item.productId)!;
-      return { productId: product.id, productCode: product.code, productName: product.name, price: product.price, commission: product.commission, quantity: item.quantity, total: product.price * BigInt(item.quantity) };
+      return { productId: product.id, productCode: product.code, productName: product.name, price: product.price, quantity: item.quantity, total: product.price * BigInt(item.quantity) };
     });
-    const totalValue = rows.reduce((sum, row) => sum + row.total, 0n);
-    const commission = rows.reduce((sum, row) => sum + row.commission * BigInt(row.quantity), 0n);
+    const totalValue = selectedRows.reduce((sum, row) => sum + row.total, 0n);
 
     const updated = await prisma.$transaction(async (database) => {
       // Serialize assignments for this member so two different waiting orders
       // cannot be assigned concurrently to the same account.
       await database.$queryRaw<Array<{ id: string }>>`SELECT "id" FROM "User" WHERE "id" = ${order.userId} FOR UPDATE`;
+      const member = await database.user.findUnique({ where: { id: order.userId }, select: { level: true } });
+      if (!member) throw new HttpError(404, "Member account not found.");
+      const rows = selectedRows.map((row) => ({ ...row, commission: calculateCommission(row.price, member.level) }));
+      const commission = rows.reduce((sum, row) => sum + row.commission * BigInt(row.quantity), 0n);
       const activeTask = await database.order.findFirst({
         where: {
           id: { not: order.id },
@@ -301,7 +339,7 @@ router.post(
       if (assignment.count !== 1) throw new HttpError(409, "This order has already been assigned.");
       await database.orderItem.createMany({ data: rows.map((row) => ({ ...row, orderId: order.id })) });
       await database.orderEvent.create({ data: { orderId: order.id, actorId: request.auth!.id, fromStatus: OrderStatus.WAITING_ASSIGNMENT, toStatus: OrderStatus.PRODUCT_ASSIGNED, note: "Product assigned by the administrator." } });
-      return database.order.findUnique({ where: { id: order.id }, include: { items: true, user: { select: { username: true, displayName: true } } } });
+      return database.order.findUnique({ where: { id: order.id }, include: { items: true, user: { select: { username: true, displayName: true, level: true } } } });
     });
     response.json(jsonSafe({ order: updated }));
   }),

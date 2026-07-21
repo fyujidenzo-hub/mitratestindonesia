@@ -20,6 +20,7 @@ enum UserLevel {
   SILVER
   GOLD
   VIP
+  VVIP
 }
 
 enum TransactionType {

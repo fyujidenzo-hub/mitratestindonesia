@@ -26,6 +26,10 @@ function ordinal(value: number) {
   return `${value}${value % 10 === 1 ? "st" : value % 10 === 2 ? "nd" : value % 10 === 3 ? "rd" : "th"}`;
 }
 
+function rupiah(value: bigint) {
+  return `Rp ${value.toString().replace(/\B(?=(\d{3})+(?!\d))/g, ".")}`;
+}
+
 router.use(authenticateCustomer);
 router.use(asyncHandler(async (request: AuthRequest, _response, next) => {
   const activeCustomer = await prisma.user.findFirst({ where: { id: request.auth!.id, role: UserRole.CUSTOMER, isActive: true }, select: { id: true } });
@@ -212,14 +216,26 @@ router.post(
     if (!completableStatuses.includes(order.status)) throw new HttpError(409, "The order is not ready to be accepted.");
 
     const updated = await prisma.$transaction(async (database) => {
+      const requiredBalance = order.requiredBalance > 0n ? order.requiredBalance : order.totalValue;
+      const account = await database.user.findUnique({ where: { id: request.auth!.id }, select: { balance: true } });
+      if (!account) throw new HttpError(404, "Account not found.");
+      if (account.balance < requiredBalance) {
+        const shortfall = requiredBalance - account.balance;
+        throw new HttpError(409, `Insufficient balance. Please top up ${rupiah(shortfall)} before submitting this task.`);
+      }
+
       const completion = await database.order.updateMany({
         where: { id: order.id, userId: request.auth!.id, status: { in: completableStatuses }, commissionCreditedAt: null },
         data: { status: OrderStatus.DELIVERED, requiresCustomerApproval: false, completedAt: new Date(), commissionCreditedAt: new Date() },
       });
       if (completion.count !== 1) throw new HttpError(409, "The commission for this order has already been credited.");
-      const completedUser = await database.user.update({
-        where: { id: request.auth!.id },
+      const credit = await database.user.updateMany({
+        where: { id: request.auth!.id, balance: { gte: requiredBalance } },
         data: { balance: { increment: order.commission }, totalOrders: { increment: 1 } },
+      });
+      if (credit.count !== 1) throw new HttpError(409, "Your balance changed. Please top up the remaining shortfall and try again.");
+      const completedUser = await database.user.findUniqueOrThrow({
+        where: { id: request.auth!.id },
         select: { totalOrders: true },
       });
       const rewardAmount = taskRewardMilestones.get(completedUser.totalOrders) ?? 0n;

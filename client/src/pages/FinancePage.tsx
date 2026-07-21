@@ -11,10 +11,12 @@ import type { Order, Transaction, User } from "../types";
 export default function FinancePage() {
   const [params, setParams] = useSearchParams();
   const tab = params.get("tab") === "withdraw" ? "withdraw" : "topup";
+  const requestedTopUp = Number(params.get("amount"));
+  const initialTopUpAmount = Number.isSafeInteger(requestedTopUp) && requestedTopUp > 0 ? String(Math.max(10_000, requestedTopUp)) : "100000";
   const { data } = useBootstrap();
   const { user, refresh } = useAuth();
   const [transactions, setTransactions] = useState<Transaction[]>([]);
-  const [topup, setTopup] = useState({ amount: "100000", senderName: "", proof: null as File | null });
+  const [topup, setTopup] = useState({ amount: initialTopUpAmount, senderName: "", proof: null as File | null });
   const [withdraw, setWithdraw] = useState({ amount: "100000", bankName: "", accountName: "", accountNumber: "", withdrawalPassword: "" });
   const [message, setMessage] = useState(""); const [tone, setTone] = useState<"success" | "error">("success"); const [loading, setLoading] = useState(false);
   const load = () => api<{ user: User; transactions: Transaction[]; orders: Order[] }>("/customer/overview").then((result) => setTransactions(result.transactions));

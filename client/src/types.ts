@@ -1,5 +1,5 @@
 export type UserRole = "CUSTOMER" | "SUPER_ADMIN" | "ADMIN" | "EMPLOYEE";
-export type UserLevel = "STARTER" | "SILVER" | "GOLD" | "VIP";
+export type UserLevel = "STARTER" | "SILVER" | "GOLD" | "VIP" | "VVIP";
 export type OrderStatus = "WAITING_ASSIGNMENT" | "PRODUCT_ASSIGNED" | "WAITING_SHIPMENT" | "PENDING_DELIVERY" | "DELIVERED" | "REJECTED";
 export type TransactionStatus = "PENDING" | "APPROVED" | "REJECTED";
 export type TransactionType = "TOPUP" | "WITHDRAWAL" | "REWARD";
@@ -116,7 +116,7 @@ export type Order = {
   commissionCreditedAt?: string;
   createdAt: string;
   items: OrderItem[];
-  user?: Pick<User, "username" | "displayName" | "balance" | "totalOrders">;
+  user?: Pick<User, "username" | "displayName" | "balance" | "totalOrders" | "level">;
 };
 
 export type BootstrapData = {

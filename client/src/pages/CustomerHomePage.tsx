@@ -18,6 +18,7 @@ import { CustomerShell } from "../components/CustomerShell";
 import { Card, Notice, StatusPill } from "../components/Ui";
 import { api, dateTime, money } from "../lib/api";
 import { useAuth } from "../lib/auth";
+import { membershipLabel } from "../lib/commission";
 import { useBootstrap } from "../lib/useBootstrap";
 import type { Order, Transaction, User } from "../types";
 
@@ -77,7 +78,7 @@ export default function CustomerHomePage() {
 
             <div className="rounded-[28px] border border-white/25 bg-white/14 p-5 backdrop-blur-xl sm:p-6">
               <div className="flex items-start justify-between gap-4"><div><p className="text-[10px] font-black uppercase tracking-[.16em] text-white/65">Available balance</p><p className="mt-2 text-3xl font-black tracking-tight sm:text-4xl">{money(currentUser?.balance ?? 0)}</p></div><span className="grid h-12 w-12 place-items-center rounded-2xl bg-white text-shopee-500 shadow-lg"><WalletCards size={24} /></span></div>
-              <div className="mt-6 grid grid-cols-2 gap-3 border-t border-white/20 pt-5"><div><p className="text-[10px] font-black uppercase tracking-wide text-white/60">Completed</p><p className="mt-1 text-xl font-black">{currentUser?.totalOrders ?? 0} tasks</p></div><div><p className="text-[10px] font-black uppercase tracking-wide text-white/60">Level</p><p className="mt-1 text-xl font-black">{currentUser?.level || "STARTER"}</p></div></div>
+              <div className="mt-6 grid grid-cols-2 gap-3 border-t border-white/20 pt-5"><div><p className="text-[10px] font-black uppercase tracking-wide text-white/60">Completed</p><p className="mt-1 text-xl font-black">{currentUser?.totalOrders ?? 0} tasks</p></div><div><p className="text-[10px] font-black uppercase tracking-wide text-white/60">Level & rate</p><p className="mt-1 text-xl font-black">{membershipLabel(currentUser?.level ?? "STARTER")}</p></div></div>
             </div>
           </div>
         </section>

@@ -9,13 +9,14 @@ export function useBootstrap() {
   const [loading, setLoading] = useState(!cached);
 
   useEffect(() => {
-    if (cached) return;
+    let active = true;
     api<BootstrapData>("/public/bootstrap")
       .then((result) => {
         cached = result;
-        setData(result);
+        if (active) setData(result);
       })
-      .finally(() => setLoading(false));
+      .finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
   }, []);
 
   return { data, loading };

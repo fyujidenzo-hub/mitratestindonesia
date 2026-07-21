@@ -1,10 +1,11 @@
-import { CheckCircle2, CircleDot, Clock3, ShoppingBag, Zap } from "lucide-react";
+import { AlertTriangle, CheckCircle2, CircleDot, Clock3, Gift, ShoppingBag, Zap } from "lucide-react";
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { CustomerShell } from "../components/CustomerShell";
 import { Card, Notice, StatusPill } from "../components/Ui";
 import { api, dateTime, money } from "../lib/api";
 import { useAuth } from "../lib/auth";
+import { rewardMilestones, rewardTaskGoal } from "../lib/rewards";
 import type { Order, Transaction, User } from "../types";
 
 const stepOrder = ["WAITING_ASSIGNMENT", "PRODUCT_ASSIGNED", "DELIVERED"];
@@ -35,6 +36,10 @@ export default function OrdersPage() {
   const completedOrder = completedOrderId ? orders.find((order) => order.id === completedOrderId && order.status === "DELIVERED") : undefined;
   const assigned = active ? assignedStatuses.includes(active.status) : false;
   const activeItem = active?.items[0];
+  const requiredBalance = active ? active.requiredBalance || active.totalValue : 0;
+  const balanceShortfall = active ? Math.max(0, requiredBalance - (user?.balance ?? 0)) : 0;
+  const hasBalanceShortfall = assigned && balanceShortfall > 0;
+  const completedTasks = user?.totalOrders ?? 0;
 
   const act = async (action: string) => {
     if (!active) return;
@@ -157,20 +162,35 @@ export default function OrdersPage() {
                 <div className="mt-5 grid gap-3 rounded-3xl border border-slate-200 bg-slate-50 p-5 text-sm sm:text-base">
                   <SummaryRow label="Your balance" value={money(user?.balance ?? 0)} />
                   <SummaryRow label="Order price" value={money(active.totalValue)} />
+                  {hasBalanceShortfall && <SummaryRow label="Balance shortfall" value={money(balanceShortfall)} orange />}
                   <SummaryRow label="Commission earned" value={`+${money(active.commission)}`} accent />
                 </div>
                 {active.requiresCustomerApproval && (
                   <p className="mt-4 rounded-2xl bg-amber-50 px-4 py-3 text-sm font-bold text-amber-800">The administrator updated this assigned product. Review it before submitting.</p>
                 )}
-                <button
-                  type="button"
-                  disabled={loading === "accept"}
-                  onClick={() => act("accept")}
-                  style={{ backgroundColor: "#ee4d2d", color: "#ffffff", boxShadow: "0 12px 26px rgba(238, 77, 45, 0.26)" }}
-                  className="mt-5 inline-flex h-14 w-full items-center justify-center rounded-2xl px-6 text-base font-black transition hover:brightness-95 disabled:cursor-not-allowed disabled:opacity-60"
-                >
-                  {loading === "accept" ? "Submitting…" : "Submit Task"}
-                </button>
+                {hasBalanceShortfall ? (
+                  <div className="mt-5 rounded-3xl border border-orange-200 bg-orange-50 p-4 sm:p-5">
+                    <div className="flex items-start gap-3">
+                      <span className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-white text-shopee-500 shadow-sm"><AlertTriangle size={21} /></span>
+                      <div>
+                        <p className="font-black text-slate-900">Top up before submitting this task</p>
+                        <p className="mt-1 text-sm font-semibold leading-6 text-slate-600">Your balance is short by <strong className="text-shopee-600">{money(balanceShortfall)}</strong>. The task will remain active until your approved balance covers the order price.</p>
+                      </div>
+                    </div>
+                    <Link to={`/finance?tab=topup&amount=${balanceShortfall}`} className="mt-4 inline-flex h-14 w-full items-center justify-center rounded-2xl bg-shopee-500 px-6 text-base font-black text-white shadow-lg shadow-shopee-500/20 transition hover:bg-shopee-600">Top Up {money(balanceShortfall)}</Link>
+                    <button type="button" disabled className="mt-2 inline-flex h-11 w-full cursor-not-allowed items-center justify-center rounded-2xl bg-slate-200 px-5 text-sm font-black text-slate-500">Submit Task — Balance Required</button>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    disabled={loading === "accept"}
+                    onClick={() => act("accept")}
+                    style={{ backgroundColor: "#ee4d2d", color: "#ffffff", boxShadow: "0 12px 26px rgba(238, 77, 45, 0.26)" }}
+                    className="mt-5 inline-flex h-14 w-full items-center justify-center rounded-2xl px-6 text-base font-black transition hover:brightness-95 disabled:cursor-not-allowed disabled:opacity-60"
+                  >
+                    {loading === "accept" ? "Submitting…" : "Submit Task"}
+                  </button>
+                )}
               </>
             )}
           </Card>
@@ -182,6 +202,8 @@ export default function OrdersPage() {
             <Link to="/task-center" className="mt-5 inline-flex h-11 items-center gap-2 rounded-2xl bg-shopee-500 px-5 text-sm font-black text-white"><Zap size={17} fill="currentColor" /> Open task center</Link>
           </Card>
         )}
+
+        <TaskRewardProgress completedTasks={completedTasks} />
 
         <section className="mt-8">
           <h2 className="text-xl font-black text-slate-900">Order history</h2>
@@ -203,6 +225,51 @@ export default function OrdersPage() {
         </section>
       </main>
     </CustomerShell>
+  );
+}
+
+function TaskRewardProgress({ completedTasks }: { completedTasks: number }) {
+  const visibleMilestones = rewardMilestones.filter((milestone) => [5, 7, 10, 15].includes(milestone.task));
+  const nextMilestone = visibleMilestones.find((milestone) => completedTasks < milestone.task);
+
+  return (
+    <section className="mt-6">
+      <Card className="overflow-hidden border-orange-100">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-orange-100 bg-gradient-to-r from-orange-50 to-white px-4 py-4 sm:px-5">
+          <div className="flex items-center gap-3">
+            <span className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-shopee-500 text-white shadow-lg shadow-shopee-500/20"><Gift size={20} /></span>
+            <div>
+              <p className="text-[10px] font-black uppercase tracking-[.16em] text-shopee-500">Automatic task bonuses</p>
+              <h2 className="mt-0.5 text-lg font-black text-slate-900">Reward milestones</h2>
+              <p className="mt-0.5 text-[11px] font-semibold text-slate-500">{Math.min(completedTasks, rewardTaskGoal)} of {rewardTaskGoal} tasks completed</p>
+            </div>
+          </div>
+          <Link to="/history" className="rounded-xl bg-white px-3 py-2 text-xs font-black text-shopee-600 shadow-sm ring-1 ring-orange-100">Usage & history →</Link>
+        </div>
+
+        <div className="px-2 py-5 sm:px-6 sm:py-6">
+          <div className="grid w-full grid-cols-4">
+            {visibleMilestones.map((milestone, index) => {
+              const earned = completedTasks >= milestone.task;
+              const active = nextMilestone?.task === milestone.task;
+              return (
+                <div key={milestone.task} className="relative px-1 text-center">
+                  {index < visibleMilestones.length - 1 && (
+                    <span className={`absolute left-1/2 top-4 h-0.5 w-full ${earned ? "bg-emerald-500" : "bg-slate-100"}`} />
+                  )}
+                  <span className={`relative z-10 mx-auto grid h-8 w-8 place-items-center rounded-full ring-4 ${earned || active ? "bg-emerald-600 text-white ring-emerald-50" : "bg-slate-100 text-slate-400 ring-slate-50"}`}>
+                    {earned ? <CheckCircle2 size={16} /> : <CircleDot size={14} />}
+                  </span>
+                  <p className={`mt-3 text-[11px] font-black sm:text-xs ${earned || active ? "text-slate-900" : "text-slate-400"}`}>Task {milestone.task}</p>
+                  <p className={`mt-1 text-[10px] font-black sm:text-xs ${earned ? "text-emerald-600" : active ? "text-shopee-600" : "text-slate-400"}`}>{money(milestone.amount)}</p>
+                  <p className="mt-1 text-[9px] font-bold text-slate-400 sm:text-[10px]">{earned ? "Earned" : active ? `${milestone.task - completedTasks} to unlock` : "Upcoming"}</p>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </Card>
+    </section>
   );
 }
 
