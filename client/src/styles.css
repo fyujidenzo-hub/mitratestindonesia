@@ -65,6 +65,17 @@ button, input, select, textarea { font: inherit; }
 button, a { -webkit-tap-highlight-color: transparent; }
 ::selection { background: #ffcdbd; color: #7c291d; }
 
+.ojk-marquee-track {
+  display: flex;
+  width: max-content;
+  animation: ojk-marquee 24s linear infinite;
+}
+
+@keyframes ojk-marquee {
+  to { transform: translateX(-50%); }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
+  .ojk-marquee-track { animation: none !important; transform: none !important; }
 }

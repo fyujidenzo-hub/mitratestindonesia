@@ -98,6 +98,7 @@ export type OrderItem = {
   commission: number;
   quantity: number;
   total: number;
+  product?: { imageUrl: string } | null;
 };
 
 export type Order = {
@@ -115,7 +116,7 @@ export type Order = {
   commissionCreditedAt?: string;
   createdAt: string;
   items: OrderItem[];
-  user?: Pick<User, "username" | "displayName" | "balance">;
+  user?: Pick<User, "username" | "displayName" | "balance" | "totalOrders">;
 };
 
 export type BootstrapData = {

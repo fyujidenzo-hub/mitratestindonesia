@@ -99,7 +99,7 @@ router.get(
     const [members, transactions, orders, taskProducts, catalogProducts, catalogBanners, banks, staff] = await Promise.all([
       prisma.user.findMany({ where: userFilter, select: { id: true, username: true, displayName: true, phone: true, balance: true, level: true, totalOrders: true, withdrawalLocked: true, withdrawalRemarks: true, isActive: true, createdAt: true, lastLoginAt: true, referrer: { select: { displayName: true, invitationCode: true } } }, orderBy: { createdAt: "desc" } }),
       prisma.transaction.findMany({ where: transactionFilter, include: { user: { select: { username: true, displayName: true } }, reviewer: { select: { displayName: true } } }, orderBy: { createdAt: "desc" }, take: 200 }),
-      prisma.order.findMany({ where: orderFilter, include: { user: { select: { username: true, displayName: true, balance: true } }, items: true }, orderBy: { createdAt: "desc" }, take: 200 }),
+      prisma.order.findMany({ where: orderFilter, include: { user: { select: { username: true, displayName: true, balance: true, totalOrders: true } }, items: true }, orderBy: { createdAt: "desc" }, take: 200 }),
       prisma.product.findMany({ orderBy: { createdAt: "desc" } }),
       prisma.catalogProduct.findMany({ orderBy: [{ price: "asc" }, { name: "asc" }] }),
       prisma.catalogBanner.findMany({ orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }] }),
@@ -269,7 +269,7 @@ router.post(
       const member = await prisma.user.findFirst({ where: { id: order.userId, referrerId: request.auth!.id }, select: { id: true } });
       if (!member) throw new HttpError(403, "This order is outside your member scope.");
     }
-    if (order.status !== OrderStatus.WAITING_ASSIGNMENT && order.status !== OrderStatus.PRODUCT_ASSIGNED) throw new HttpError(409, "This order cannot be assigned right now.");
+    if (order.status !== OrderStatus.WAITING_ASSIGNMENT || order.items.length > 0) throw new HttpError(409, "This order has already been assigned.");
     const products = await prisma.product.findMany({ where: { id: { in: input.items.map((item) => item.productId) }, active: true } });
     if (products.length !== new Set(input.items.map((item) => item.productId)).size) throw new HttpError(400, "One or more products could not be found.");
 
@@ -279,15 +279,28 @@ router.post(
     });
     const totalValue = rows.reduce((sum, row) => sum + row.total, 0n);
     const commission = rows.reduce((sum, row) => sum + row.commission * BigInt(row.quantity), 0n);
-    const currentSelection = order.items.map((item) => `${item.productId}:${item.quantity}`).sort().join("|");
-    const nextSelection = input.items.map((item) => `${item.productId}:${item.quantity}`).sort().join("|");
-    const changingSelection = order.items.length > 0 && currentSelection !== nextSelection;
 
     const updated = await prisma.$transaction(async (database) => {
-      await database.orderItem.deleteMany({ where: { orderId: order.id } });
+      // Serialize assignments for this member so two different waiting orders
+      // cannot be assigned concurrently to the same account.
+      await database.$queryRaw<Array<{ id: string }>>`SELECT "id" FROM "User" WHERE "id" = ${order.userId} FOR UPDATE`;
+      const activeTask = await database.order.findFirst({
+        where: {
+          id: { not: order.id },
+          userId: order.userId,
+          status: { in: [OrderStatus.PRODUCT_ASSIGNED, OrderStatus.WAITING_SHIPMENT, OrderStatus.PENDING_DELIVERY] },
+        },
+        select: { id: true },
+      });
+      if (activeTask) throw new HttpError(409, "This member already has an active assigned task. Complete it before assigning another order.");
+
+      const assignment = await database.order.updateMany({
+        where: { id: order.id, status: OrderStatus.WAITING_ASSIGNMENT },
+        data: { adminId: request.auth!.id, status: OrderStatus.PRODUCT_ASSIGNED, totalValue, commission, requiredBalance: totalValue, assignedAt: new Date(), requiresCustomerApproval: false },
+      });
+      if (assignment.count !== 1) throw new HttpError(409, "This order has already been assigned.");
       await database.orderItem.createMany({ data: rows.map((row) => ({ ...row, orderId: order.id })) });
-      await database.order.update({ where: { id: order.id }, data: { adminId: request.auth!.id, status: OrderStatus.PRODUCT_ASSIGNED, totalValue, commission, requiredBalance: totalValue, assignedAt: new Date(), requiresCustomerApproval: changingSelection } });
-      await database.orderEvent.create({ data: { orderId: order.id, actorId: request.auth!.id, fromStatus: order.status, toStatus: OrderStatus.PRODUCT_ASSIGNED, note: changingSelection ? "The administrator changed the product selection; customer approval is required." : "Product assigned by the administrator." } });
+      await database.orderEvent.create({ data: { orderId: order.id, actorId: request.auth!.id, fromStatus: OrderStatus.WAITING_ASSIGNMENT, toStatus: OrderStatus.PRODUCT_ASSIGNED, note: "Product assigned by the administrator." } });
       return database.order.findUnique({ where: { id: order.id }, include: { items: true, user: { select: { username: true, displayName: true } } } });
     });
     response.json(jsonSafe({ order: updated }));
@@ -310,22 +323,65 @@ router.post(
 
 router.patch(
   "/members/:id/access",
-  requireRole(UserRole.SUPER_ADMIN),
+  requireRole(UserRole.SUPER_ADMIN, UserRole.ADMIN),
   asyncHandler(async (request: AuthRequest, response) => {
-    const input = z.object({ level: z.enum(UserLevel), active: z.boolean() }).parse(request.body);
+    const input = z.object({
+      level: z.enum(UserLevel),
+      active: z.boolean(),
+      withdrawalLocked: z.boolean().optional(),
+      accountPassword: z.union([z.string().min(8).max(100), z.literal("")]).optional().default(""),
+      withdrawalPassword: z.union([z.string().regex(/^\d{6}$/, "Use a 6 digit withdrawal PIN."), z.literal("")]).optional().default(""),
+      remarks: z.string().trim().max(500).optional().default(""),
+    }).refine(
+      (value) => !(value.accountPassword || value.withdrawalPassword) || value.remarks.length >= 3,
+      { message: "Add a short remark explaining the password reset.", path: ["remarks"] },
+    ).parse(request.body);
     const memberId = String(request.params.id);
-    const existing = await prisma.user.findFirst({ where: { id: memberId, role: UserRole.CUSTOMER }, select: { id: true, username: true, level: true, isActive: true } });
+    const existing = await prisma.user.findFirst({
+      where: {
+        id: memberId,
+        role: UserRole.CUSTOMER,
+        ...(request.auth!.role === UserRole.SUPER_ADMIN ? {} : { referrerId: request.auth!.id }),
+      },
+      select: { id: true, username: true, level: true, isActive: true, withdrawalLocked: true },
+    });
     if (!existing) throw new HttpError(404, "Member account not found.");
+    if (request.auth!.role !== UserRole.SUPER_ADMIN && (input.level !== existing.level || input.active !== existing.isActive)) {
+      throw new HttpError(403, "Only a Super Admin can change membership level or account access.");
+    }
+
+    const accountPasswordHash = input.accountPassword ? await bcrypt.hash(input.accountPassword, 12) : undefined;
+    const withdrawalPasswordHash = input.withdrawalPassword ? await bcrypt.hash(input.withdrawalPassword, 12) : undefined;
 
     const member = await prisma.$transaction(async (database) => {
-      const updated = await database.user.update({ where: { id: memberId }, data: { level: input.level, isActive: input.active } });
+      const updated = await database.user.update({
+        where: { id: memberId },
+        data: {
+          level: input.level,
+          isActive: input.active,
+          withdrawalLocked: input.withdrawalLocked ?? existing.withdrawalLocked,
+          ...(accountPasswordHash ? { passwordHash: accountPasswordHash } : {}),
+          ...(withdrawalPasswordHash ? { withdrawalPasswordHash } : {}),
+        },
+      });
       await database.auditLog.create({
         data: {
           actorId: request.auth!.id,
-          action: "MEMBER_ACCESS_UPDATED",
+          action: accountPasswordHash || withdrawalPasswordHash ? "MEMBER_SECURITY_UPDATED" : "MEMBER_ACCESS_UPDATED",
           entityType: "User",
           entityId: memberId,
-          details: { username: existing.username, previousLevel: existing.level, level: input.level, previousActive: existing.isActive, active: input.active },
+          details: {
+            username: existing.username,
+            previousLevel: existing.level,
+            level: input.level,
+            previousActive: existing.isActive,
+            active: input.active,
+            previousWithdrawalLocked: existing.withdrawalLocked,
+            withdrawalLocked: input.withdrawalLocked ?? existing.withdrawalLocked,
+            accountPasswordReset: Boolean(accountPasswordHash),
+            withdrawalPasswordReset: Boolean(withdrawalPasswordHash),
+            remarks: input.remarks || null,
+          },
         },
       });
       return updated;
@@ -336,10 +392,33 @@ router.patch(
 
 router.patch(
   "/members/:id/withdrawal-lock",
-  requireRole(UserRole.SUPER_ADMIN),
-  asyncHandler(async (request, response) => {
+  requireRole(UserRole.SUPER_ADMIN, UserRole.ADMIN),
+  asyncHandler(async (request: AuthRequest, response) => {
     const input = z.object({ locked: z.boolean(), remarks: z.string().trim().max(500).optional() }).parse(request.body);
-    const user = await prisma.user.update({ where: { id: String(request.params.id) }, data: { withdrawalLocked: input.locked, withdrawalRemarks: input.remarks || null } });
+    const memberId = String(request.params.id);
+    const existing = await prisma.user.findFirst({
+      where: {
+        id: memberId,
+        role: UserRole.CUSTOMER,
+        ...(request.auth!.role === UserRole.SUPER_ADMIN ? {} : { referrerId: request.auth!.id }),
+      },
+      select: { id: true, username: true, withdrawalLocked: true },
+    });
+    if (!existing) throw new HttpError(404, "Member account not found.");
+
+    const user = await prisma.$transaction(async (database) => {
+      const updated = await database.user.update({ where: { id: memberId }, data: { withdrawalLocked: input.locked, withdrawalRemarks: input.remarks || null } });
+      await database.auditLog.create({
+        data: {
+          actorId: request.auth!.id,
+          action: input.locked ? "MEMBER_WITHDRAWALS_CLOSED" : "MEMBER_WITHDRAWALS_OPENED",
+          entityType: "User",
+          entityId: memberId,
+          details: { username: existing.username, previousLocked: existing.withdrawalLocked, locked: input.locked, remarks: input.remarks || null },
+        },
+      });
+      return updated;
+    });
     response.json(jsonSafe({ user }));
   }),
 );

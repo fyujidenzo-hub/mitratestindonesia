@@ -12,6 +12,19 @@ import { asyncHandler, HttpError, jsonSafe, requestNumber } from "../lib/http.js
 const router = Router();
 const activeStatuses = [OrderStatus.WAITING_ASSIGNMENT, OrderStatus.PRODUCT_ASSIGNED, OrderStatus.WAITING_SHIPMENT, OrderStatus.PENDING_DELIVERY];
 const securityLimiter = rateLimit({ windowMs: 15 * 60_000, limit: 5, standardHeaders: "draft-8", legacyHeaders: false });
+const taskRewardMilestones = new Map<number, bigint>([
+  [5, 25_000n],
+  [7, 50_000n],
+  [10, 75_000n],
+  [12, 150_000n],
+  [15, 200_000n],
+]);
+
+function ordinal(value: number) {
+  const remainder = value % 100;
+  if (remainder >= 11 && remainder <= 13) return `${value}th`;
+  return `${value}${value % 10 === 1 ? "st" : value % 10 === 2 ? "nd" : value % 10 === 3 ? "rd" : "th"}`;
+}
 
 router.use(authenticateCustomer);
 router.use(asyncHandler(async (request: AuthRequest, _response, next) => {
@@ -38,7 +51,15 @@ router.get(
     const [user, transactions, orders] = await Promise.all([
       prisma.user.findUnique({ where: { id: request.auth!.id }, include: { referrer: { select: { displayName: true } } } }),
       prisma.transaction.findMany({ where: { userId: request.auth!.id }, orderBy: { createdAt: "desc" }, take: 50 }),
-      prisma.order.findMany({ where: { userId: request.auth!.id }, include: { items: true, events: { orderBy: { createdAt: "asc" } } }, orderBy: { createdAt: "desc" }, take: 50 }),
+      prisma.order.findMany({
+        where: { userId: request.auth!.id },
+        include: {
+          items: { include: { product: { select: { imageUrl: true } } } },
+          events: { orderBy: { createdAt: "asc" } },
+        },
+        orderBy: { createdAt: "desc" },
+        take: 50,
+      }),
     ]);
     if (!user) throw new HttpError(404, "Account not found.");
     const { passwordHash: _passwordHash, withdrawalPasswordHash: _withdrawalPasswordHash, ...safeUser } = user;
@@ -184,52 +205,49 @@ router.post(
 router.post(
   "/orders/:id/action",
   asyncHandler(async (request: AuthRequest, response) => {
-    const { action } = z.object({ action: z.enum(["start-shipment", "submit", "confirm-delivery", "accept-change", "reject-change"]) }).parse(request.body);
+    z.object({ action: z.literal("accept") }).parse(request.body);
     const order = await prisma.order.findFirst({ where: { id: String(request.params.id), userId: request.auth!.id }, include: { items: true } });
     if (!order) throw new HttpError(404, "Order not found.");
-
-    if (action === "start-shipment") {
-      if (order.status !== OrderStatus.PRODUCT_ASSIGNED || order.requiresCustomerApproval) throw new HttpError(409, "The order is not ready for shipment.");
-      const updated = await changeStatus(order.id, request.auth!.id, order.status, OrderStatus.WAITING_SHIPMENT, { submittedAt: new Date() });
-      return response.json(jsonSafe({ order: updated }));
-    }
-    if (action === "submit") {
-      if (order.status !== OrderStatus.WAITING_SHIPMENT) throw new HttpError(409, "Start the shipment process first.");
-      const updated = await changeStatus(order.id, request.auth!.id, order.status, OrderStatus.PENDING_DELIVERY);
-      return response.json(jsonSafe({ order: updated }));
-    }
-    if (action === "accept-change") {
-      if (!order.requiresCustomerApproval) throw new HttpError(409, "There is no product change awaiting approval.");
-      const updated = await prisma.order.update({ where: { id: order.id }, data: { requiresCustomerApproval: false } });
-      return response.json(jsonSafe({ order: updated }));
-    }
-    if (action === "reject-change") {
-      if (!order.requiresCustomerApproval) throw new HttpError(409, "There is no product change to reject.");
-      const updated = await changeStatus(order.id, request.auth!.id, order.status, OrderStatus.REJECTED, { requiresCustomerApproval: false, completedAt: new Date() });
-      return response.json(jsonSafe({ order: updated }));
-    }
-    if (order.status !== OrderStatus.PENDING_DELIVERY) throw new HttpError(409, "The order is not awaiting delivery confirmation.");
+    const completableStatuses: OrderStatus[] = [OrderStatus.PRODUCT_ASSIGNED, OrderStatus.WAITING_SHIPMENT, OrderStatus.PENDING_DELIVERY];
+    if (!completableStatuses.includes(order.status)) throw new HttpError(409, "The order is not ready to be accepted.");
 
     const updated = await prisma.$transaction(async (database) => {
       const completion = await database.order.updateMany({
-        where: { id: order.id, userId: request.auth!.id, status: OrderStatus.PENDING_DELIVERY, commissionCreditedAt: null },
-        data: { status: OrderStatus.DELIVERED, completedAt: new Date(), commissionCreditedAt: new Date() },
+        where: { id: order.id, userId: request.auth!.id, status: { in: completableStatuses }, commissionCreditedAt: null },
+        data: { status: OrderStatus.DELIVERED, requiresCustomerApproval: false, completedAt: new Date(), commissionCreditedAt: new Date() },
       });
       if (completion.count !== 1) throw new HttpError(409, "The commission for this order has already been credited.");
-      await database.user.update({ where: { id: request.auth!.id }, data: { balance: { increment: order.commission }, totalOrders: { increment: 1 } } });
-      await database.orderEvent.create({ data: { orderId: order.id, actorId: request.auth!.id, fromStatus: order.status, toStatus: OrderStatus.DELIVERED, note: "Order received and commission credited." } });
-      return database.order.findUnique({ where: { id: order.id }, include: { items: true, events: true } });
+      const completedUser = await database.user.update({
+        where: { id: request.auth!.id },
+        data: { balance: { increment: order.commission }, totalOrders: { increment: 1 } },
+        select: { totalOrders: true },
+      });
+      const rewardAmount = taskRewardMilestones.get(completedUser.totalOrders) ?? 0n;
+      if (rewardAmount > 0n) {
+        await database.user.update({ where: { id: request.auth!.id }, data: { balance: { increment: rewardAmount } } });
+        await database.transaction.create({
+          data: {
+            requestNumber: requestNumber("TR"),
+            userId: request.auth!.id,
+            type: TransactionType.REWARD,
+            amount: rewardAmount,
+            status: TransactionStatus.APPROVED,
+            senderName: `Bonus Reward for Completing the ${ordinal(completedUser.totalOrders)} Task`,
+            creditedAt: new Date(),
+            reviewedAt: new Date(),
+          },
+        });
+      }
+      await database.orderEvent.create({ data: { orderId: order.id, actorId: request.auth!.id, fromStatus: order.status, toStatus: OrderStatus.DELIVERED, note: "Product accepted; task completed and commission credited." } });
+      const completedOrder = await database.order.findUnique({ where: { id: order.id }, include: { items: true, events: true } });
+      return {
+        order: completedOrder,
+        completedTasks: completedUser.totalOrders,
+        milestoneReward: rewardAmount > 0n ? { task: completedUser.totalOrders, amount: rewardAmount } : null,
+      };
     });
-    response.json(jsonSafe({ order: updated }));
+    response.json(jsonSafe(updated));
   }),
 );
-
-async function changeStatus(id: string, actorId: string, fromStatus: OrderStatus, toStatus: OrderStatus, extra: Record<string, unknown> = {}) {
-  return prisma.$transaction(async (database) => {
-    await database.order.update({ where: { id }, data: { ...extra, status: toStatus } });
-    await database.orderEvent.create({ data: { orderId: id, actorId, fromStatus, toStatus } });
-    return database.order.findUnique({ where: { id }, include: { items: true, events: true } });
-  });
-}
 
 export default router;

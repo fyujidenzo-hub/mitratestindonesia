@@ -6,6 +6,7 @@ import {
   ClipboardList,
   Headphones,
   PackageCheck,
+  ShieldCheck,
   ShoppingBag,
   Sparkles,
   WalletCards,
@@ -133,6 +134,12 @@ export default function CustomerHomePage() {
           <picture><source media="(max-width: 639px)" srcSet="/assets/campaign-mobile-en.png" /><img src="/assets/campaign-desktop-en.png" alt="Super Shopping Day promotion" className="absolute inset-0 h-full w-full object-cover object-center transition duration-500 group-hover:scale-[1.02]" /></picture>
           <span className="absolute bottom-4 right-4 inline-flex items-center gap-2 rounded-2xl bg-slate-950/90 px-4 py-3 text-xs font-black text-white shadow-xl backdrop-blur">Explore the full catalog <ArrowRight size={16} /></span>
         </Link>
+
+        <section aria-label="Important regulatory information" className="mt-5 overflow-hidden rounded-2xl border border-orange-200 bg-gradient-to-r from-shopee-500 to-orange-500 py-3 text-white shadow-lg shadow-shopee-500/15">
+          <div className="ojk-marquee-track">
+            {[0, 1].map((copy) => <div key={copy} aria-hidden={copy === 1} className="flex shrink-0 items-center gap-10 pr-10 text-sm font-black"><span className="inline-flex items-center gap-2"><span className="h-2 w-2 rounded-full bg-white" /> Important information</span><span>All activities and services are supervised by the Financial Services Authority (OJK).</span><span className="inline-flex items-center gap-2"><ShieldCheck size={18} /> Secure and supervised services</span></div>)}
+          </div>
+        </section>
       </main>
     </CustomerShell>
   );
