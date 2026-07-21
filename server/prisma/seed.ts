@@ -89,9 +89,13 @@ async function main() {
     { code: "BANNER-010", title: "Adidas Super Brand Day", altText: "Adidas Super Brand Day promotion", imageUrl: "/assets/catalog-banners/07-adidas-enhanced.jpg", sortOrder: 10 },
     { code: "BANNER-011", title: "Belanja Instant", altText: "Shopee instant shopping promotion", imageUrl: "/assets/catalog-banners/08-belanja-instant-enhanced.jpg", sortOrder: 11 },
   ];
-  for (const banner of catalogBanners) {
-    await prisma.catalogBanner.upsert({ where: { code: banner.code }, update: {}, create: { ...banner, active: true } });
-  }
+for (const banner of catalogBanners) {
+  await prisma.catalogBanner.upsert({
+    where: { code: banner.code },
+    update: { ...banner, active: true },
+    create: { ...banner, active: true },
+  });
+}
 
   if ((await prisma.bank.count()) === 0) {
     await prisma.bank.createMany({

@@ -45,8 +45,18 @@ app.use("/api/admin", adminRoutes);
 if (process.env.NODE_ENV === "production") {
   const rootClientDist = path.resolve("client/dist");
   const clientDist = existsSync(rootClientDist) ? rootClientDist : path.resolve("../client/dist");
-  app.use("/assets", express.static(path.join(clientDist, "assets"), { maxAge: "1y", immutable: true }));
-  app.use((_request, response) => response.set("Cache-Control", "no-cache").sendFile(path.join(clientDist, "index.html")));
+  app.use(
+    express.static(clientDist, {
+      index: false,
+      maxAge: "1h",
+    }),
+  );
+
+  app.use((_request, response) =>
+    response
+      .set("Cache-Control", "no-cache")
+      .sendFile(path.join(clientDist, "index.html")),
+  );
 }
 
 app.use((error: unknown, _request: express.Request, response: express.Response, _next: express.NextFunction) => {
