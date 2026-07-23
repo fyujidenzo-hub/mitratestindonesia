@@ -5,7 +5,7 @@ import { useI18n } from "../lib/i18n";
 export const inputClass = "h-12 w-full rounded-2xl border border-slate-200 bg-white px-4 text-sm font-semibold text-slate-900 outline-none transition placeholder:text-slate-400 focus:border-shopee-400 focus:ring-4 focus:ring-shopee-100 disabled:bg-slate-100";
 
 export function Field({ label, hint, children }: { label: string; hint?: string; children: ReactNode }) {
-  return <label className="grid gap-2 text-sm font-extrabold text-slate-700"><span>{label}</span>{children}{hint && <span className="text-xs font-medium text-slate-400">{hint}</span>}</label>;
+  return <label className="grid self-start gap-2 text-sm font-extrabold text-slate-700"><span>{label}</span>{children}{hint && <span className="text-xs font-medium text-slate-400">{hint}</span>}</label>;
 }
 
 export function Button({ children, loading, variant = "primary", className = "", ...props }: React.ButtonHTMLAttributes<HTMLButtonElement> & { loading?: boolean; variant?: "primary" | "secondary" | "ghost" | "danger" }) {
