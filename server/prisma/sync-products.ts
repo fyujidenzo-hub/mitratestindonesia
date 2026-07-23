@@ -1,8 +1,9 @@
 import "dotenv/config";
-import { PrismaClient, UserLevel } from "@prisma/client";
+import { UserLevel } from "@prisma/client";
 import { calculateCommission } from "../src/lib/commission.js";
+import { createPrismaClient } from "../src/lib/prisma-client.js";
 
-const prisma = new PrismaClient();
+const prisma = createPrismaClient();
 
 function catalogProductToTaskProductData(catalogProduct: {
   code: string;

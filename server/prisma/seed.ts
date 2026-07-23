@@ -1,9 +1,10 @@
 import "dotenv/config";
-import { PrismaClient, UserLevel, UserRole } from "@prisma/client";
+import { UserLevel, UserRole } from "@prisma/client";
 import bcrypt from "bcryptjs";
 import { calculateCommission } from "../src/lib/commission.js";
+import { createPrismaClient } from "../src/lib/prisma-client.js";
 
-const prisma = new PrismaClient();
+const prisma = createPrismaClient();
 
 async function main() {
   const [adminPassword, customerPassword, withdrawalPassword] = await Promise.all([
