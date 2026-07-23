@@ -1,4 +1,4 @@
-import { AlertTriangle, BadgeDollarSign, Banknote, Boxes, Check, ChevronLeft, ChevronRight, ClipboardList, ExternalLink, Eye, LayoutDashboard, LockKeyhole, LogOut, Menu, PackageCheck, PackagePlus, Pencil, Plus, Power, RefreshCw, Search, Send, Settings2, ShieldCheck, ShoppingBag, Trash2, UserCog, UserPlus, Users, WalletCards, X } from "lucide-react";
+import { AlertTriangle, BadgeDollarSign, Banknote, Boxes, Check, ChevronDown, ChevronLeft, ChevronRight, ClipboardList, ExternalLink, Eye, LayoutDashboard, LockKeyhole, LogOut, Menu, PackageCheck, PackagePlus, Pencil, Plus, Power, RefreshCw, Search, Send, Settings2, ShieldCheck, ShoppingBag, Trash2, UserCog, UserPlus, Users, WalletCards, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Brand } from "../components/Brand";
@@ -354,12 +354,12 @@ function GeneratedCodeField({ label, hint, value, onChange, placeholder, onRegen
   placeholder: string;
   onRegenerate?: () => void;
 }) {
-  return <div className="grid gap-2">
-    <div className="flex items-center justify-between gap-3">
-      <span className="text-sm font-extrabold text-slate-700">{label}</span>
-      {onRegenerate && <button type="button" onClick={onRegenerate} className="inline-flex h-7 shrink-0 items-center gap-1 rounded-lg bg-shopee-50 px-2 text-[11px] font-black text-shopee-600 transition hover:bg-shopee-100 focus:outline-none focus:ring-2 focus:ring-shopee-200"><RefreshCw size={13} /> Regenerate</button>}
+  return <div className="grid self-start gap-2">
+    <span className="text-sm font-extrabold text-slate-700">{label}</span>
+    <div className="relative">
+      <input required maxLength={40} className={`${inputClass} ${onRegenerate ? "pr-32" : ""}`} value={value} onChange={(event) => onChange(event.target.value.toUpperCase())} placeholder={placeholder} />
+      {onRegenerate && <button type="button" onClick={onRegenerate} aria-label={`Regenerate ${label.toLowerCase()}`} className="absolute right-2 top-1/2 inline-flex h-8 -translate-y-1/2 items-center gap-1 rounded-xl bg-shopee-50 px-2.5 text-[11px] font-black text-shopee-600 transition hover:bg-shopee-100 focus:outline-none focus:ring-2 focus:ring-shopee-200"><RefreshCw size={13} /> Regenerate</button>}
     </div>
-    <input required maxLength={40} className={inputClass} value={value} onChange={(event) => onChange(event.target.value.toUpperCase())} placeholder={placeholder} />
     {hint && <span className="text-xs font-medium text-slate-400">{hint}</span>}
   </div>;
 }
@@ -444,6 +444,22 @@ const emptyCatalogDraft: CatalogDraft = {
   active: true,
 };
 
+const defaultCatalogCategories = [
+  "Electronics",
+  "Fashion",
+  "Beauty",
+  "Home",
+  "Food",
+  "Health",
+  "Sports",
+  "Automotive",
+  "Baby & Kids",
+  "Groceries",
+  "Office & Stationery",
+  "Accessories",
+  "Other",
+];
+
 function draftFromCatalogProduct(product: CatalogProduct): CatalogDraft {
   return {
     code: product.code,
@@ -503,6 +519,10 @@ function Catalog({ products, banners, productCodes, bannerCodes, perform }: { pr
   };
 
   const draft = editing?.draft;
+  const categoryOptions = useMemo(() => {
+    const categories = [...defaultCatalogCategories, ...products.map((product) => product.category), ...(draft?.category ? [draft.category] : [])];
+    return categories.filter((category, index) => categories.findIndex((item) => item.toLowerCase() === category.toLowerCase()) === index);
+  }, [draft?.category, products]);
   const draftIsValid = Boolean(
     draft?.code.trim()
     && draft.name.trim()
@@ -537,7 +557,7 @@ function Catalog({ products, banners, productCodes, bannerCodes, perform }: { pr
 
     {viewing && <Modal title="Catalog product details" onClose={() => setViewing(null)} wide><div className="overflow-hidden rounded-3xl bg-slate-100"><img src={viewing.imageUrl} alt={viewing.name} className="aspect-[16/8] w-full object-cover" /></div><div className="mt-5 flex flex-wrap items-center gap-2"><StatusPill status={viewing.active ? "ACTIVE" : "INACTIVE"} /><span className="rounded-full bg-slate-100 px-3 py-1 text-[11px] font-black uppercase tracking-wide text-slate-500">{viewing.category}</span></div><h3 className="mt-4 text-2xl font-black text-slate-900">{viewing.name}</h3><p className="mt-2 text-sm font-semibold leading-6 text-slate-500">{viewing.description || "No product description has been added."}</p><div className="mt-5 grid gap-3 sm:grid-cols-2"><ProductDetail label="Price" value={money(viewing.price)} /><ProductDetail label="Product code" value={viewing.code} /></div><div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end"><Button variant="ghost" onClick={() => setViewing(null)}>Close</Button><Button onClick={() => beginEdit(viewing)}><Pencil size={17} /> Edit product</Button></div></Modal>}
 
-    {editing && draft && <Modal title={editing.mode === "create" ? "Add catalog product" : "Edit catalog product"} onClose={() => !busy && setEditing(null)} wide><form onSubmit={(event) => { event.preventDefault(); saveCatalogProduct(); }}><div className="grid gap-4 sm:grid-cols-2"><GeneratedCodeField label="Product code" hint={editing.mode === "create" ? "Generated automatically. You may edit it before saving." : "Unique code using letters, numbers, dots, dashes, or underscores."} value={draft.code} onChange={(value) => updateDraft("code", value)} placeholder="CAT-ITEM-01" onRegenerate={editing.mode === "create" ? () => updateDraft("code", nextSequentialCode([...productCodes, draft.code], "CAT-ITEM-", 2)) : undefined} /><Field label="Category"><input required maxLength={80} className={inputClass} value={draft.category} onChange={(event) => updateDraft("category", event.target.value)} placeholder="Electronics" /></Field><div className="sm:col-span-2"><Field label="Product name"><input required maxLength={180} className={inputClass} value={draft.name} onChange={(event) => updateDraft("name", event.target.value)} placeholder="Product name" /></Field></div><div className="sm:col-span-2"><Field label="Description" hint="Optional storefront product details."><textarea maxLength={5000} className={`${inputClass} min-h-24 resize-y py-3`} value={draft.description} onChange={(event) => updateDraft("description", event.target.value)} placeholder="Add a short product description" /></Field></div><Field label="Price (IDR)"><input required min="1" max="1000000000000" step="1" type="number" className={inputClass} value={draft.price} onChange={(event) => updateDraft("price", event.target.value)} placeholder="189000" /></Field><div className="sm:col-span-2"><Field label="Image URL or asset path" hint="Use https://... or an existing /assets/... path."><input required maxLength={2000} className={inputClass} value={draft.imageUrl} onChange={(event) => updateDraft("imageUrl", event.target.value)} placeholder="https://images.unsplash.com/..." /></Field></div></div>{draft.imageUrl && <div className="mt-4 overflow-hidden rounded-2xl border border-slate-200 bg-slate-50"><img src={draft.imageUrl} alt="Product preview" className="h-40 w-full object-cover" /></div>}<label className="mt-5 flex cursor-pointer items-center justify-between gap-4 rounded-2xl border border-slate-200 bg-slate-50 p-4"><span><span className="block text-sm font-black text-slate-800">Active product</span><span className="mt-1 block text-xs font-semibold text-slate-400">Active products appear in the customer product galleries.</span></span><input type="checkbox" checked={draft.active} onChange={(event) => updateDraft("active", event.target.checked)} className="h-5 w-5 accent-[#ee4d2d]" /></label><div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end"><Button type="button" variant="ghost" disabled={busy} onClick={() => setEditing(null)}>Cancel</Button><Button type="submit" loading={busy} disabled={!draftIsValid}>{editing.mode === "create" ? <><Plus size={17} /> Add product</> : <><Check size={17} /> Save changes</>}</Button></div></form></Modal>}
+    {editing && draft && <Modal title={editing.mode === "create" ? "Add catalog product" : "Edit catalog product"} onClose={() => !busy && setEditing(null)} wide><form onSubmit={(event) => { event.preventDefault(); saveCatalogProduct(); }}><div className="grid items-start gap-4 sm:grid-cols-2"><GeneratedCodeField label="Product code" hint={editing.mode === "create" ? "Generated automatically. You may edit it before saving." : "Unique code using letters, numbers, dots, dashes, or underscores."} value={draft.code} onChange={(value) => updateDraft("code", value)} placeholder="CAT-ITEM-01" onRegenerate={editing.mode === "create" ? () => updateDraft("code", nextSequentialCode([...productCodes, draft.code], "CAT-ITEM-", 2)) : undefined} /><label className="grid self-start gap-2 text-sm font-extrabold text-slate-700"><span>Category</span><span className="relative"><select required className={`${inputClass} cursor-pointer appearance-none pr-10`} value={draft.category} onChange={(event) => updateDraft("category", event.target.value)}><option value="" disabled>Select a category</option>{categoryOptions.map((category) => <option key={category} value={category}>{category}</option>)}</select><ChevronDown aria-hidden="true" size={17} className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 text-slate-400" /></span><span className="text-xs font-medium text-slate-400">Choose the storefront section for this product.</span></label><div className="sm:col-span-2"><Field label="Product name"><input required maxLength={180} className={inputClass} value={draft.name} onChange={(event) => updateDraft("name", event.target.value)} placeholder="Product name" /></Field></div><div className="sm:col-span-2"><Field label="Description" hint="Optional storefront product details."><textarea maxLength={5000} className={`${inputClass} min-h-24 resize-y py-3`} value={draft.description} onChange={(event) => updateDraft("description", event.target.value)} placeholder="Add a short product description" /></Field></div><Field label="Price (IDR)"><input required min="1" max="1000000000000" step="1" type="number" className={inputClass} value={draft.price} onChange={(event) => updateDraft("price", event.target.value)} placeholder="189000" /></Field><div className="sm:col-span-2"><Field label="Image URL or asset path" hint="Use https://... or an existing /assets/... path."><input required maxLength={2000} className={inputClass} value={draft.imageUrl} onChange={(event) => updateDraft("imageUrl", event.target.value)} placeholder="https://images.unsplash.com/..." /></Field></div></div>{draft.imageUrl && <div className="mt-4 overflow-hidden rounded-2xl border border-slate-200 bg-slate-50"><img src={draft.imageUrl} alt="Product preview" className="h-40 w-full object-cover" /></div>}<label className="mt-5 flex cursor-pointer items-center justify-between gap-4 rounded-2xl border border-slate-200 bg-slate-50 p-4"><span><span className="block text-sm font-black text-slate-800">Active product</span><span className="mt-1 block text-xs font-semibold text-slate-400">Active products appear in the customer product galleries.</span></span><input type="checkbox" checked={draft.active} onChange={(event) => updateDraft("active", event.target.checked)} className="h-5 w-5 accent-[#ee4d2d]" /></label><div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end"><Button type="button" variant="ghost" disabled={busy} onClick={() => setEditing(null)}>Cancel</Button><Button type="submit" loading={busy} disabled={!draftIsValid}>{editing.mode === "create" ? <><Plus size={17} /> Add product</> : <><Check size={17} /> Save changes</>}</Button></div></form></Modal>}
 
     {deleting && <Modal title="Delete catalog product?" onClose={() => !busy && setDeleting(null)}><div className="flex gap-4 rounded-3xl border border-rose-200 bg-rose-50 p-4"><span className="grid h-12 w-12 shrink-0 place-items-center rounded-2xl bg-white text-rose-600"><AlertTriangle size={23} /></span><div><p className="font-black text-rose-900">{deleting.name}</p><p className="mt-1 text-sm font-semibold leading-6 text-rose-700">This removes the item from the customer product galleries.</p></div></div><div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end"><Button variant="ghost" disabled={busy} onClick={() => setDeleting(null)}>Cancel</Button><Button variant="danger" loading={busy} onClick={deleteCatalogProduct}><Trash2 size={17} /> Delete permanently</Button></div></Modal>}
   </>;
