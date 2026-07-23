@@ -460,13 +460,18 @@ const defaultCatalogCategories = [
   "Other",
 ];
 
+function canonicalCatalogCategory(category: string) {
+  const trimmed = category.trim();
+  return trimmed.toLowerCase() === "elektronik" ? "Electronics" : trimmed;
+}
+
 function draftFromCatalogProduct(product: CatalogProduct): CatalogDraft {
   return {
     code: product.code,
     name: product.name,
     description: product.description || "",
     price: String(product.price),
-    category: product.category,
+    category: canonicalCatalogCategory(product.category),
     imageUrl: product.imageUrl,
     active: product.active,
   };
@@ -497,6 +502,7 @@ function Catalog({ products, banners, productCodes, bannerCodes, perform }: { pr
     const payload = {
       ...editing.draft,
       code: editing.draft.code.trim().toUpperCase(),
+      category: canonicalCatalogCategory(editing.draft.category),
       price: Number(editing.draft.price),
     };
     const created = editing.mode === "create";
@@ -520,7 +526,11 @@ function Catalog({ products, banners, productCodes, bannerCodes, perform }: { pr
 
   const draft = editing?.draft;
   const categoryOptions = useMemo(() => {
-    const categories = [...defaultCatalogCategories, ...products.map((product) => product.category), ...(draft?.category ? [draft.category] : [])];
+    const categories = [
+      ...defaultCatalogCategories,
+      ...products.map((product) => canonicalCatalogCategory(product.category)),
+      ...(draft?.category ? [canonicalCatalogCategory(draft.category)] : []),
+    ];
     return categories.filter((category, index) => categories.findIndex((item) => item.toLowerCase() === category.toLowerCase()) === index);
   }, [draft?.category, products]);
   const draftIsValid = Boolean(
