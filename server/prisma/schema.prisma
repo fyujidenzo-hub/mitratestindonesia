@@ -98,8 +98,9 @@ model Product {
   @@index([category, active])
 }
 
-// Display-only merchandise. These records are intentionally unrelated to
-// Product and OrderItem so customer catalog browsing cannot create task items.
+// Customer catalogue merchandise. The admin route synchronizes its editable
+// task fields into Product, while this model remains unrelated to OrderItem so
+// past order references stay stable.
 model CatalogProduct {
   id          String   @id @default(cuid())
   code        String   @unique @db.VarChar(40)

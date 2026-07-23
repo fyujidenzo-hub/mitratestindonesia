@@ -1,7 +1,7 @@
 import { Router } from "express";
 import path from "node:path";
 import bcrypt from "bcryptjs";
-import { OrderStatus, TransactionStatus, TransactionType, UserLevel, UserRole } from "@prisma/client";
+import { OrderStatus, Prisma, TransactionStatus, TransactionType, UserLevel, UserRole } from "@prisma/client";
 import { z } from "zod";
 import { authenticateAdmin, type AuthRequest, requireRole } from "../middleware/auth.js";
 import { calculateCommission } from "../lib/commission.js";
@@ -26,6 +26,73 @@ const catalogProductInputSchema = z.object({
   imageUrl: z.string().trim().max(2000).refine((value) => value.startsWith("https://") || value.startsWith("/assets/"), "Use a secure https:// URL or a local /assets/ path."),
   active: z.boolean(),
 });
+
+type CatalogProductInput = z.infer<typeof catalogProductInputSchema>;
+
+/**
+ * CatalogProduct is the customer-facing catalogue record, while Product is the
+ * order-assignment record. They intentionally remain separate models so order
+ * history keeps its Product references, but their editable task fields must
+ * stay in sync.
+ */
+function catalogProductToTaskProductData(input: CatalogProductInput) {
+  const price = BigInt(input.price);
+  return {
+    code: input.code,
+    name: input.name,
+    description: input.description || null,
+    price,
+    commission: calculateCommission(price, UserLevel.STARTER),
+    requiredBalance: price,
+    category: input.category,
+    imageUrl: input.imageUrl,
+    active: input.active,
+  };
+}
+
+/**
+ * Upsert the Product used by order assignment for a catalogue product. The
+ * update payload intentionally excludes quantity so manual stock adjustments
+ * are never overwritten. When a catalogue code changes, the existing Product
+ * is renamed in-place to preserve every OrderItem.productId relation.
+ */
+async function syncCatalogProductToTaskProduct(
+  database: Prisma.TransactionClient,
+  input: CatalogProductInput,
+  previousCode = input.code,
+) {
+  const taskProductData = catalogProductToTaskProductData(input);
+
+  // The normal create/update path is a true code-based upsert. Its update
+  // payload intentionally omits quantity, preserving existing task stock.
+  if (previousCode === input.code) {
+    return database.product.upsert({
+      where: { code: input.code },
+      update: taskProductData,
+      create: { ...taskProductData, quantity: 100 },
+    });
+  }
+
+  const previousProduct = await database.product.findUnique({ where: { code: previousCode } });
+
+  const destinationProduct = await database.product.findUnique({ where: { code: input.code } });
+  if (destinationProduct && (!previousProduct || previousProduct.id !== destinationProduct.id)) {
+    throw new HttpError(409, `Cannot change the catalog code to ${input.code} because another task product already uses it.`);
+  }
+
+  if (previousProduct) {
+    return database.product.update({ where: { id: previousProduct.id }, data: taskProductData });
+  }
+
+  return database.product.create({ data: { ...taskProductData, quantity: 100 } });
+}
+
+function catalogCodeConflict(code: string, error: unknown) {
+  if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === "P2002") {
+    return new HttpError(409, `A catalog or task product already uses code ${code}. Choose a different code.`);
+  }
+  return error;
+}
 
 const catalogBannerInputSchema = z.object({
   code: z.string().trim().min(2).max(40).regex(/^[a-zA-Z0-9._-]+$/, "Use letters, numbers, dots, dashes, or underscores only.").transform((value) => value.toUpperCase()),
@@ -473,25 +540,34 @@ router.post(
   requireRole(UserRole.SUPER_ADMIN),
   asyncHandler(async (request: AuthRequest, response) => {
     const input = catalogProductInputSchema.parse(request.body);
-    const product = await prisma.$transaction(async (database) => {
-      const created = await database.catalogProduct.create({
-        data: {
-          ...input,
-          description: input.description || null,
-          price: BigInt(input.price),
-        },
+    let product;
+    try {
+      product = await prisma.$transaction(async (database) => {
+        const duplicate = await database.catalogProduct.findUnique({ where: { code: input.code }, select: { id: true } });
+        if (duplicate) throw new HttpError(409, `A catalog product already uses code ${input.code}. Choose a different code.`);
+
+        const created = await database.catalogProduct.create({
+          data: {
+            ...input,
+            description: input.description || null,
+            price: BigInt(input.price),
+          },
+        });
+        await syncCatalogProductToTaskProduct(database, input);
+        await database.auditLog.create({
+          data: {
+            actorId: request.auth!.id,
+            action: "CATALOG_PRODUCT_CREATED",
+            entityType: "CatalogProduct",
+            entityId: created.id,
+            details: { code: created.code, name: created.name },
+          },
+        });
+        return created;
       });
-      await database.auditLog.create({
-        data: {
-          actorId: request.auth!.id,
-          action: "CATALOG_PRODUCT_CREATED",
-          entityType: "CatalogProduct",
-          entityId: created.id,
-          details: { code: created.code, name: created.name },
-        },
-      });
-      return created;
-    });
+    } catch (error) {
+      throw catalogCodeConflict(input.code, error);
+    }
     response.status(201).json(jsonSafe({ product }));
   }),
 );
@@ -501,29 +577,40 @@ router.patch(
   requireRole(UserRole.SUPER_ADMIN),
   asyncHandler(async (request: AuthRequest, response) => {
     const input = catalogProductInputSchema.parse(request.body);
-    const existing = await prisma.catalogProduct.findUnique({ where: { id: String(request.params.id) } });
-    if (!existing) throw new HttpError(404, "Catalog product not found.");
+    let product;
+    try {
+      product = await prisma.$transaction(async (database) => {
+        const existing = await database.catalogProduct.findUnique({ where: { id: String(request.params.id) } });
+        if (!existing) throw new HttpError(404, "Catalog product not found.");
 
-    const product = await prisma.$transaction(async (database) => {
-      const updated = await database.catalogProduct.update({
-        where: { id: existing.id },
-        data: {
-          ...input,
-          description: input.description || null,
-          price: BigInt(input.price),
-        },
+        const duplicate = await database.catalogProduct.findUnique({ where: { code: input.code }, select: { id: true } });
+        if (duplicate && duplicate.id !== existing.id) {
+          throw new HttpError(409, `A catalog product already uses code ${input.code}. Choose a different code.`);
+        }
+
+        const updated = await database.catalogProduct.update({
+          where: { id: existing.id },
+          data: {
+            ...input,
+            description: input.description || null,
+            price: BigInt(input.price),
+          },
+        });
+        await syncCatalogProductToTaskProduct(database, input, existing.code);
+        await database.auditLog.create({
+          data: {
+            actorId: request.auth!.id,
+            action: "CATALOG_PRODUCT_UPDATED",
+            entityType: "CatalogProduct",
+            entityId: updated.id,
+            details: { code: updated.code, name: updated.name, previousCode: existing.code },
+          },
+        });
+        return updated;
       });
-      await database.auditLog.create({
-        data: {
-          actorId: request.auth!.id,
-          action: "CATALOG_PRODUCT_UPDATED",
-          entityType: "CatalogProduct",
-          entityId: updated.id,
-          details: { code: updated.code, name: updated.name, previousCode: existing.code },
-        },
-      });
-      return updated;
-    });
+    } catch (error) {
+      throw catalogCodeConflict(input.code, error);
+    }
     response.json(jsonSafe({ product }));
   }),
 );
@@ -532,10 +619,14 @@ router.delete(
   "/catalog-products/:id",
   requireRole(UserRole.SUPER_ADMIN),
   asyncHandler(async (request: AuthRequest, response) => {
-    const existing = await prisma.catalogProduct.findUnique({ where: { id: String(request.params.id) } });
-    if (!existing) throw new HttpError(404, "Catalog product not found.");
-
     await prisma.$transaction(async (database) => {
+      const existing = await database.catalogProduct.findUnique({ where: { id: String(request.params.id) } });
+      if (!existing) throw new HttpError(404, "Catalog product not found.");
+
+      // Keep Product rows for historical OrderItem.productId relations. Making
+      // the matching task product inactive removes it from the existing admin
+      // assignment picker (which filters active products) without deleting it.
+      await database.product.updateMany({ where: { code: existing.code }, data: { active: false } });
       await database.catalogProduct.delete({ where: { id: existing.id } });
       await database.auditLog.create({
         data: {

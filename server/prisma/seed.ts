@@ -1,6 +1,7 @@
 import "dotenv/config";
-import { PrismaClient, UserRole } from "@prisma/client";
+import { PrismaClient, UserLevel, UserRole } from "@prisma/client";
 import bcrypt from "bcryptjs";
+import { calculateCommission } from "../src/lib/commission.js";
 
 const prisma = new PrismaClient();
 
@@ -55,25 +56,36 @@ async function main() {
   });
 
   const products = [
-    { code: "SHP-LAP-01", name: "Laptop Gaming ROG 15", price: 7457500n, commission: 372875n, requiredBalance: 0n, quantity: 25, category: "Electronics", imageUrl: "https://images.unsplash.com/photo-1603302576837-37561b2e2302?auto=format&fit=crop&w=900&q=80" },
-    { code: "SHP-PHN-02", name: "Smartphone Pro 5G 256GB", price: 4899000n, commission: 244950n, requiredBalance: 0n, quantity: 60, category: "Electronics", imageUrl: "https://images.unsplash.com/photo-1511707171634-5f897ff02aa9?auto=format&fit=crop&w=900&q=80" },
-    { code: "SHP-HME-03", name: "Smart Home Essential Set", price: 1299000n, commission: 129900n, requiredBalance: 0n, quantity: 80, category: "Home", imageUrl: "https://images.unsplash.com/photo-1558002038-1055907df827?auto=format&fit=crop&w=900&q=80" },
-    { code: "SHP-FSN-04", name: "Daily Fashion Bundle", price: 329000n, commission: 49350n, requiredBalance: 0n, quantity: 120, category: "Fashion", imageUrl: "https://images.unsplash.com/photo-1445205170230-053b83016050?auto=format&fit=crop&w=900&q=80" },
-    { code: "SHP-BTY-05", name: "Skincare Glow Collection", price: 489000n, commission: 73350n, requiredBalance: 0n, quantity: 90, category: "Beauty", imageUrl: "https://images.unsplash.com/photo-1556228578-8c89e6adf883?auto=format&fit=crop&w=900&q=80" },
-    { code: "SHP-FOD-06", name: "Indonesian Snack Box", price: 189000n, commission: 28350n, requiredBalance: 0n, quantity: 150, category: "Food", imageUrl: "https://images.unsplash.com/photo-1621939514649-280e2aa9454f?auto=format&fit=crop&w=900&q=80" },
+    { code: "SHP-LAP-01", name: "Laptop Gaming ROG 15", price: 7457500n, quantity: 25, category: "Electronics", imageUrl: "https://images.unsplash.com/photo-1603302576837-37561b2e2302?auto=format&fit=crop&w=900&q=80" },
+    { code: "SHP-PHN-02", name: "Smartphone Pro 5G 256GB", price: 4899000n, quantity: 60, category: "Electronics", imageUrl: "https://images.unsplash.com/photo-1511707171634-5f897ff02aa9?auto=format&fit=crop&w=900&q=80" },
+    { code: "SHP-HME-03", name: "Smart Home Essential Set", price: 1299000n, quantity: 80, category: "Home", imageUrl: "https://images.unsplash.com/photo-1558002038-1055907df827?auto=format&fit=crop&w=900&q=80" },
+    { code: "SHP-FSN-04", name: "Daily Fashion Bundle", price: 329000n, quantity: 120, category: "Fashion", imageUrl: "https://images.unsplash.com/photo-1445205170230-053b83016050?auto=format&fit=crop&w=900&q=80" },
+    { code: "SHP-BTY-05", name: "Skincare Glow Collection", price: 489000n, quantity: 90, category: "Beauty", imageUrl: "https://images.unsplash.com/photo-1556228578-8c89e6adf883?auto=format&fit=crop&w=900&q=80" },
+    { code: "SHP-FOD-06", name: "Indonesian Snack Box", price: 189000n, quantity: 150, category: "Food", imageUrl: "https://images.unsplash.com/photo-1621939514649-280e2aa9454f?auto=format&fit=crop&w=900&q=80" },
   ];
 
   for (const product of products) {
-    await prisma.product.upsert({ where: { code: product.code }, update: product, create: product });
     const catalogProduct = {
       code: product.code,
       name: product.name,
+      description: null,
       price: product.price,
       category: product.category,
       imageUrl: product.code === "SHP-FOD-06" ? "/assets/catalog-banners/08-belanja-instant-enhanced.jpg" : product.imageUrl,
       active: true,
     };
-    await prisma.catalogProduct.upsert({ where: { code: product.code }, update: {}, create: catalogProduct });
+    await prisma.catalogProduct.upsert({ where: { code: product.code }, update: catalogProduct, create: catalogProduct });
+    const taskProduct = {
+      ...catalogProduct,
+      commission: calculateCommission(catalogProduct.price, UserLevel.STARTER),
+      requiredBalance: catalogProduct.price,
+    };
+    await prisma.product.upsert({
+      where: { code: product.code },
+      // Retain an existing quantity when seed data is reapplied.
+      update: taskProduct,
+      create: { ...taskProduct, quantity: product.quantity },
+    });
   }
 
   const catalogBanners = [
