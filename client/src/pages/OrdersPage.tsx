@@ -5,7 +5,7 @@ import { CustomerShell } from "../components/CustomerShell";
 import { Card, Notice, StatusPill } from "../components/Ui";
 import { api, dateTime, money } from "../lib/api";
 import { useAuth } from "../lib/auth";
-import { rewardMilestones, rewardTaskGoal } from "../lib/rewards";
+import { defaultRewardSettings, normalizeRewardSettings, rewardTaskGoal, type RewardSettings } from "../lib/rewards";
 import { useI18n } from "../lib/i18n";
 import type { Order, Transaction, User } from "../types";
 
@@ -29,10 +29,14 @@ export default function OrdersPage() {
   const [loading, setLoading] = useState("");
   const [completedOrderId, setCompletedOrderId] = useState<string | null>(null);
   const [balanceWarning, setBalanceWarning] = useState("");
+  const [rewardSettings, setRewardSettings] = useState<RewardSettings>(defaultRewardSettings);
   const balanceWarningTimer = useRef<number | null>(null);
 
-  const load = () => api<{ user: User; transactions: Transaction[]; orders: Order[] }>("/customer/overview")
-    .then((result) => setOrders(result.orders));
+  const load = () => api<{ user: User; transactions: Transaction[]; orders: Order[]; rewardSettings: RewardSettings }>("/customer/overview")
+    .then((result) => {
+      setOrders(result.orders);
+      setRewardSettings(normalizeRewardSettings(result.rewardSettings));
+    });
 
   useEffect(() => { load(); }, []);
   useEffect(() => () => {
@@ -105,10 +109,10 @@ export default function OrdersPage() {
 
   return (
     <CustomerShell>
-      <main className="mx-auto max-w-5xl px-4 py-6 sm:px-6 sm:py-8">
+      <main className="mx-auto w-full min-w-0 max-w-5xl px-3 py-5 sm:px-6 sm:py-8">
         <div>
           <p className="text-xs font-black uppercase tracking-[.18em] text-shopee-500">{t("Task center")}</p>
-          <h1 className="mt-1 text-3xl font-black tracking-tight text-slate-900">{t("Your tasks & orders")}</h1>
+          <h1 className="mt-1 text-2xl font-black tracking-tight text-slate-900 sm:text-3xl">{t("Your tasks & orders")}</h1>
           <p className="mt-2 text-sm font-semibold text-slate-500">{t("Review assigned products and submit completed order tasks.")}</p>
         </div>
 
@@ -117,7 +121,7 @@ export default function OrdersPage() {
         {completedOrder && <CompletedTaskCard order={completedOrder} />}
 
         {active ? (
-          <Card className="mt-6 overflow-hidden p-4 sm:p-7">
+          <Card className="mt-5 w-full min-w-0 overflow-hidden p-3.5 sm:mt-6 sm:p-5 md:p-7">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
                 <p className="text-xs font-black uppercase tracking-[.16em] text-shopee-500">{assigned ? t("Assigned product") : t("Waiting for order task")}</p>
@@ -126,18 +130,18 @@ export default function OrdersPage() {
               <StatusPill status={assigned ? "TASK ASSIGNED" : "ORDER NOT YET AVAILABLE"} />
             </div>
 
-            <div className="mt-5 grid gap-0 sm:grid-cols-3">
+            <div className="mt-5 grid gap-0 md:grid-cols-3">
               {stepOrder.map((step, index) => {
                 const visibleStatus = assigned ? "PRODUCT_ASSIGNED" : active.status;
                 const current = stepOrder.indexOf(visibleStatus);
                 const complete = index <= current;
                 return (
-                  <div key={step} className="relative flex gap-3 pb-4 sm:block sm:pb-0 sm:text-center">
-                    <div className={`relative z-10 grid h-8 w-8 shrink-0 place-items-center rounded-full sm:mx-auto ${complete ? "bg-emerald-600 text-white" : "bg-slate-100 text-slate-400"}`}>
+                  <div key={step} className="relative flex gap-3 pb-4 md:block md:pb-0 md:text-center">
+                    <div className={`relative z-10 grid h-8 w-8 shrink-0 place-items-center rounded-full md:mx-auto ${complete ? "bg-emerald-600 text-white" : "bg-slate-100 text-slate-400"}`}>
                       {index < current ? <CheckCircle2 size={16} /> : <CircleDot size={15} />}
                     </div>
-                    {index < stepOrder.length - 1 && <span className={`absolute left-[15px] top-8 h-full w-0.5 sm:left-1/2 sm:top-[15px] sm:h-0.5 sm:w-full ${index < current ? "bg-emerald-500" : "bg-slate-100"}`} />}
-                    <p className={`pt-1.5 text-xs font-black sm:mt-2 ${complete ? "text-slate-800" : "text-slate-400"}`}>{labels[step]}</p>
+                    {index < stepOrder.length - 1 && <span className={`absolute left-[15px] top-8 h-full w-0.5 md:left-1/2 md:top-[15px] md:h-0.5 md:w-full ${index < current ? "bg-emerald-500" : "bg-slate-100"}`} />}
+                    <p className={`pt-1.5 text-xs font-black md:mt-2 ${complete ? "text-slate-800" : "text-slate-400"}`}>{labels[step]}</p>
                   </div>
                 );
               })}
@@ -145,8 +149,8 @@ export default function OrdersPage() {
 
             {activeItem ? (
               <div className="mt-6 rounded-3xl border border-slate-200 p-4 sm:p-5">
-                <div className="grid gap-5 sm:grid-cols-[140px_1fr] sm:items-center">
-                  <div className="aspect-square overflow-hidden rounded-2xl bg-slate-50">
+                <div className="grid min-w-0 gap-5 md:grid-cols-[160px_minmax(0,1fr)] md:items-center">
+                  <div className="mx-auto aspect-square w-full max-w-[230px] overflow-hidden rounded-2xl bg-slate-50 md:max-w-none">
                     {activeItem.product?.imageUrl ? (
                       <img src={activeItem.product.imageUrl} alt={activeItem.productName} className="h-full w-full object-cover" />
                     ) : (
@@ -155,8 +159,8 @@ export default function OrdersPage() {
                   </div>
                   <div className="min-w-0">
                     <p className="text-[11px] font-black uppercase tracking-[.15em] text-slate-400">{t("Product")}</p>
-                    <h2 className="mt-1 text-xl font-black leading-snug text-slate-900">{activeItem.productName}</h2>
-                    <p className="mt-1 text-sm font-bold text-slate-400">{activeItem.productCode} · {active.referenceNumber}</p>
+                    <h2 className="mt-1 break-words text-lg font-black leading-snug text-slate-900 sm:text-xl">{activeItem.productName}</h2>
+                    <p className="mt-1 break-all text-xs font-bold text-slate-400 sm:text-sm">{activeItem.productCode} · {active.referenceNumber}</p>
                     <div className="mt-5">
                       <p className="text-[11px] font-black uppercase tracking-[.15em] text-slate-400">{t("Order price")}</p>
                       <p className="mt-1 text-2xl font-black text-slate-900">{money(active.totalValue)}</p>
@@ -228,17 +232,17 @@ export default function OrdersPage() {
           </Card>
         )}
 
-        <TaskRewardProgress completedTasks={completedTasks} />
+        <TaskRewardProgress completedTasks={completedTasks} settings={rewardSettings} />
 
         <section className="mt-8">
           <h2 className="text-xl font-black text-slate-900">{t("Order history")}</h2>
-          <div className="mt-4 grid gap-3">
+          <div className="mt-4 grid min-w-0 gap-3">
             {orders.filter((order) => order.id !== active?.id && order.id !== completedOrder?.id).map((order) => (
-              <Card key={order.id} className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center">
+              <Card key={order.id} className="flex min-w-0 flex-col gap-3 p-4 sm:flex-row sm:items-center">
                 <div className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-slate-100 text-slate-500">{order.status === "DELIVERED" ? <CheckCircle2 /> : <Clock3 />}</div>
                 <div className="min-w-0 flex-1">
-                  <p className="truncate font-black text-slate-900">{order.items[0]?.productName || "Task without a product"}</p>
-                  <p className="mt-1 text-xs font-semibold text-slate-400">{order.referenceNumber} · {dateTime(order.createdAt)}</p>
+                  <p className="break-words font-black leading-snug text-slate-900 sm:truncate">{order.items[0]?.productName || "Task without a product"}</p>
+                  <p className="mt-1 break-all text-xs font-semibold text-slate-400">{order.referenceNumber} · {dateTime(order.createdAt)}</p>
                 </div>
                 <div className="flex items-center justify-between gap-3 sm:block sm:text-right">
                   <StatusPill status={order.status} />
@@ -253,8 +257,8 @@ export default function OrdersPage() {
   );
 }
 
-function TaskRewardProgress({ completedTasks }: { completedTasks: number }) {
-  const visibleMilestones = rewardMilestones.filter((milestone) => [5, 7, 10, 15].includes(milestone.task));
+function TaskRewardProgress({ completedTasks, settings }: { completedTasks: number; settings: RewardSettings }) {
+  const visibleMilestones = settings.milestones.filter((milestone) => [5, 7, 10, 15].includes(milestone.task));
   const nextMilestone = visibleMilestones.find((milestone) => completedTasks < milestone.task);
 
   return (
@@ -272,15 +276,15 @@ function TaskRewardProgress({ completedTasks }: { completedTasks: number }) {
           <Link to="/history" className="rounded-xl bg-white px-3 py-2 text-xs font-black text-shopee-600 shadow-sm ring-1 ring-orange-100">Usage & history →</Link>
         </div>
 
-        <div className="px-2 py-5 sm:px-6 sm:py-6">
-          <div className="grid w-full grid-cols-4">
+        <div className="px-3 py-5 sm:px-6 sm:py-6">
+          <div className="grid w-full grid-cols-2 gap-y-6 sm:grid-cols-4 sm:gap-y-0">
             {visibleMilestones.map((milestone, index) => {
               const earned = completedTasks >= milestone.task;
               const active = nextMilestone?.task === milestone.task;
               return (
                 <div key={milestone.task} className="relative px-1 text-center">
                   {index < visibleMilestones.length - 1 && (
-                    <span className={`absolute left-1/2 top-4 h-0.5 w-full ${earned ? "bg-emerald-500" : "bg-slate-100"}`} />
+                    <span className={`absolute left-1/2 top-4 hidden h-0.5 w-full sm:block ${earned ? "bg-emerald-500" : "bg-slate-100"}`} />
                   )}
                   <span className={`relative z-10 mx-auto grid h-8 w-8 place-items-center rounded-full ring-4 ${earned || active ? "bg-emerald-600 text-white ring-emerald-50" : "bg-slate-100 text-slate-400 ring-slate-50"}`}>
                     {earned ? <CheckCircle2 size={16} /> : <CircleDot size={14} />}
@@ -319,8 +323,8 @@ function CompletedTaskCard({ order }: { order: Order }) {
       </div>
 
       <div className="p-4 sm:p-7">
-        <div className="grid gap-5 rounded-3xl border border-orange-100 bg-orange-50/30 p-4 sm:grid-cols-[140px_1fr] sm:items-center sm:p-5">
-          <div className="aspect-square overflow-hidden rounded-2xl bg-white">
+        <div className="grid min-w-0 gap-5 rounded-3xl border border-orange-100 bg-orange-50/30 p-4 md:grid-cols-[160px_minmax(0,1fr)] md:items-center md:p-5">
+          <div className="mx-auto aspect-square w-full max-w-[230px] overflow-hidden rounded-2xl bg-white md:max-w-none">
             {item?.product?.imageUrl ? (
               <img src={item.product.imageUrl} alt={item.productName} className="h-full w-full object-cover" />
             ) : (
@@ -329,8 +333,8 @@ function CompletedTaskCard({ order }: { order: Order }) {
           </div>
           <div className="min-w-0">
             <p className="text-[11px] font-black uppercase tracking-[.15em] text-shopee-500">Completed product</p>
-            <h3 className="mt-1 text-xl font-black leading-snug text-slate-900">{item?.productName || "Completed order task"}</h3>
-            <p className="mt-1 text-sm font-bold text-slate-400">{item?.productCode} · {order.referenceNumber}</p>
+            <h3 className="mt-1 break-words text-lg font-black leading-snug text-slate-900 sm:text-xl">{item?.productName || "Completed order task"}</h3>
+            <p className="mt-1 break-all text-xs font-bold text-slate-400 sm:text-sm">{item?.productCode} · {order.referenceNumber}</p>
             <div className="mt-5 grid gap-2 text-sm">
               <SummaryRow label="Order price" value={money(order.totalValue)} />
               <SummaryRow label="Commission earned" value={`+${money(order.commission)}`} orange />

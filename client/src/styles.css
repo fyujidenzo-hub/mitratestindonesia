@@ -4,6 +4,20 @@
 @tailwind utilities;
 
 @media (max-width: 767px) {
+  html,
+  body,
+  #root {
+    width: 100%;
+    min-width: 0;
+    max-width: 100%;
+    overflow-x: hidden;
+  }
+
+  body {
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+  }
+
   main div.overflow-x-auto:has(> table) {
     overscroll-behavior-x: contain;
     scroll-behavior: smooth;

@@ -21,6 +21,7 @@ export type User = {
   isActive?: boolean;
   createdAt?: string;
   lastLoginAt?: string;
+  lastSeenAt?: string;
   referrer?: { id?: string; displayName: string; invitationCode?: string };
 };
 

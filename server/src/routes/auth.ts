@@ -83,7 +83,14 @@ router.post(
       throw new HttpError(403, "Use the administrator sign-in page for this account.");
     }
 
-    await prisma.user.update({ where: { id: user.id }, data: { lastLoginAt: new Date() } });
+    const signedInAt = new Date();
+    await prisma.user.update({
+      where: { id: user.id },
+      data: {
+        lastLoginAt: signedInAt,
+        ...(user.role === UserRole.CUSTOMER ? { lastSeenAt: signedInAt } : {}),
+      },
+    });
     setSession(response, input.area, user.id, user.role);
     response.json({ user: publicUser(user) });
   }),
@@ -122,6 +129,7 @@ router.post(
         role: UserRole.CUSTOMER,
         balance: referrer.registrationBonus,
         referrerId: referrer.id,
+        lastSeenAt: new Date(),
       },
       include: { referrer: { select: { id: true, displayName: true } } },
     });

@@ -23,7 +23,9 @@ function catalogProductToTaskProductData(catalogProduct: {
     requiredBalance: catalogProduct.price,
     category: catalogProduct.category,
     imageUrl: catalogProduct.imageUrl,
-    active: catalogProduct.active,
+    // Storefront visibility is independent from task availability. Catalog
+    // products stay assignable until an administrator deletes them.
+    active: true,
   };
 }
 

@@ -7,9 +7,15 @@ import { authenticateAdmin, type AuthRequest, requireRole } from "../middleware/
 import { calculateCommission } from "../lib/commission.js";
 import { prisma } from "../lib/prisma.js";
 import { asyncHandler, HttpError, jsonSafe, requestNumber } from "../lib/http.js";
+import {
+  rewardMilestoneTasks,
+  rewardSettingKeys,
+  serializeRewardMilestones,
+} from "../lib/reward-settings.js";
 
 const router = Router();
 const staffRoles: UserRole[] = [UserRole.SUPER_ADMIN, UserRole.ADMIN, UserRole.EMPLOYEE];
+const memberOnlineWindowMs = 45_000;
 
 function databaseMembershipLevel(level: UserLevel): UserLevel {
   if (level === UserLevel.VVIP) return UserLevel.VIP;
@@ -33,7 +39,8 @@ type CatalogProductInput = z.infer<typeof catalogProductInputSchema>;
  * CatalogProduct is the customer-facing catalogue record, while Product is the
  * order-assignment record. They intentionally remain separate models so order
  * history keeps its Product references, but their editable task fields must
- * stay in sync.
+ * stay in sync. CatalogProduct.active controls public storefront visibility;
+ * a saved catalog item remains available for task assignment until deleted.
  */
 function catalogProductToTaskProductData(input: CatalogProductInput) {
   const price = BigInt(input.price);
@@ -46,7 +53,7 @@ function catalogProductToTaskProductData(input: CatalogProductInput) {
     requiredBalance: price,
     category: input.category,
     imageUrl: input.imageUrl,
-    active: input.active,
+    active: true,
   };
 }
 
@@ -110,7 +117,29 @@ const supportSettingsInputSchema = z.object({
   }, "Use a valid Telegram t.me link."),
 });
 
+const rewardSettingsInputSchema = z.object({
+  milestones: z.array(z.object({
+    task: z.number().int().refine(
+      (task): task is (typeof rewardMilestoneTasks)[number] => rewardMilestoneTasks.includes(task as (typeof rewardMilestoneTasks)[number]),
+      "Use a supported reward milestone.",
+    ),
+    amount: z.number().int().min(0).max(1_000_000_000),
+  })).length(rewardMilestoneTasks.length).superRefine((milestones, context) => {
+    const tasks = milestones.map((milestone) => milestone.task);
+    for (const task of rewardMilestoneTasks) {
+      if (!tasks.includes(task)) context.addIssue({ code: "custom", message: `Task ${task} reward is required.` });
+    }
+    if (new Set(tasks).size !== milestones.length) {
+      context.addIssue({ code: "custom", message: "Reward milestones cannot be duplicated." });
+    }
+  }),
+  terms: z.string().trim().min(1, "Terms and conditions are required.").max(5000),
+});
+
 const staffRoleSchema = z.enum([UserRole.ADMIN, UserRole.EMPLOYEE]);
+const memberPhoneSearchSchema = z.object({
+  phone: z.string().trim().max(32).default(""),
+});
 const optionalPhoneSchema = z.union([z.string().trim().min(8).max(32), z.literal("")]).optional().transform((value) => value || undefined);
 const staffBaseInputSchema = z.object({
   username: z.string().trim().min(3).max(64).regex(/^[a-zA-Z0-9._-]+$/, "Use letters, numbers, dots, dashes, or underscores only.").transform((value) => value.toLowerCase()),
@@ -178,7 +207,7 @@ router.get(
     const orderFilter = scopedUserIds ? { userId: { in: scopedUserIds } } : {};
 
     const [members, transactions, orders, taskProducts, catalogProducts, catalogBanners, banks, staff, settings] = await Promise.all([
-      prisma.user.findMany({ where: userFilter, select: { id: true, username: true, displayName: true, phone: true, balance: true, level: true, totalOrders: true, withdrawalLocked: true, withdrawalRemarks: true, isActive: true, createdAt: true, lastLoginAt: true, referrer: { select: { displayName: true, invitationCode: true } } }, orderBy: { createdAt: "desc" } }),
+      prisma.user.findMany({ where: userFilter, select: { id: true, username: true, displayName: true, phone: true, balance: true, level: true, totalOrders: true, withdrawalLocked: true, withdrawalRemarks: true, isActive: true, createdAt: true, lastLoginAt: true, lastSeenAt: true, referrer: { select: { displayName: true, invitationCode: true } } }, orderBy: { createdAt: "desc" } }),
       prisma.transaction.findMany({ where: transactionFilter, include: { user: { select: { username: true, displayName: true } }, reviewer: { select: { displayName: true } } }, orderBy: { createdAt: "desc" }, take: 200 }),
       prisma.order.findMany({ where: orderFilter, include: { user: { select: { username: true, displayName: true, balance: true, totalOrders: true, level: true } }, items: true }, orderBy: { createdAt: "desc" }, take: 200 }),
       prisma.product.findMany({ orderBy: { createdAt: "desc" } }),
@@ -191,6 +220,69 @@ router.get(
       prisma.siteSetting.findMany(),
     ]);
     response.json(jsonSafe({ members, transactions, orders, taskProducts, catalogProducts, catalogBanners, banks, staff, settings: Object.fromEntries(settings.map((setting) => [setting.key, setting.value])) }));
+  }),
+);
+
+router.get(
+  "/members/search",
+  asyncHandler(async (request: AuthRequest, response) => {
+    const { phone } = memberPhoneSearchSchema.parse(request.query);
+    if (!phone) return response.json({ members: [] });
+
+    const memberScope: Prisma.UserWhereInput = request.auth!.role === UserRole.SUPER_ADMIN
+      ? { role: UserRole.CUSTOMER }
+      : { referrerId: request.auth!.id };
+
+    const members = await prisma.user.findMany({
+      where: {
+        ...memberScope,
+        phone: { startsWith: phone },
+      },
+      select: {
+        id: true,
+        username: true,
+        displayName: true,
+        phone: true,
+        balance: true,
+        level: true,
+        totalOrders: true,
+        withdrawalLocked: true,
+        withdrawalRemarks: true,
+        isActive: true,
+        createdAt: true,
+        lastLoginAt: true,
+        lastSeenAt: true,
+        referrer: { select: { displayName: true, invitationCode: true } },
+      },
+      orderBy: { phone: "asc" },
+      take: 25,
+    });
+
+    response.json(jsonSafe({ members }));
+  }),
+);
+
+router.get(
+  "/members/presence",
+  asyncHandler(async (request: AuthRequest, response) => {
+    const memberScope: Prisma.UserWhereInput = request.auth!.role === UserRole.SUPER_ADMIN
+      ? { role: UserRole.CUSTOMER }
+      : { referrerId: request.auth!.id };
+    const onlineSince = new Date(Date.now() - memberOnlineWindowMs);
+    const onlineMembers = await prisma.user.findMany({
+      where: {
+        ...memberScope,
+        isActive: true,
+        lastSeenAt: { gte: onlineSince },
+      },
+      select: { id: true, lastSeenAt: true },
+    });
+
+    response.json(jsonSafe({
+      onlineMembers,
+      onlineWindowSeconds: memberOnlineWindowMs / 1000,
+      checkedAt: new Date(),
+    }));
   }),
 );
 
@@ -217,6 +309,43 @@ router.patch(
       return updated;
     });
     response.json(jsonSafe({ setting }));
+  }),
+);
+
+router.patch(
+  "/settings/rewards",
+  requireRole(UserRole.SUPER_ADMIN),
+  asyncHandler(async (request: AuthRequest, response) => {
+    const input = rewardSettingsInputSchema.parse(request.body);
+    const orderedMilestones = rewardMilestoneTasks.map((task) => input.milestones.find((milestone) => milestone.task === task)!);
+    const milestoneValue = serializeRewardMilestones(orderedMilestones);
+
+    const settings = await prisma.$transaction(async (database) => {
+      const [milestones, terms] = await Promise.all([
+        database.siteSetting.upsert({
+          where: { key: rewardSettingKeys.milestones },
+          create: { key: rewardSettingKeys.milestones, value: milestoneValue },
+          update: { value: milestoneValue },
+        }),
+        database.siteSetting.upsert({
+          where: { key: rewardSettingKeys.terms },
+          create: { key: rewardSettingKeys.terms, value: input.terms },
+          update: { value: input.terms },
+        }),
+      ]);
+      await database.auditLog.create({
+        data: {
+          actorId: request.auth!.id,
+          action: "REWARD_SETTINGS_UPDATE",
+          entityType: "SiteSetting",
+          entityId: rewardSettingKeys.milestones,
+          details: { milestones: orderedMilestones, terms: input.terms },
+        },
+      });
+      return { milestones, terms };
+    });
+
+    response.json(jsonSafe({ settings }));
   }),
 );
 

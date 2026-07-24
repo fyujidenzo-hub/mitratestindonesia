@@ -66,6 +66,7 @@ model User {
   createdAt              DateTime      @default(now())
   updatedAt              DateTime      @updatedAt
   lastLoginAt            DateTime?
+  lastSeenAt             DateTime?
 
   referrer            User?         @relation("Referrals", fields: [referrerId], references: [id], onDelete: SetNull)
   referrals           User[]        @relation("Referrals")
@@ -78,6 +79,8 @@ model User {
 
   @@index([referrerId])
   @@index([role, isActive])
+  @@index([phone(ops: raw("text_pattern_ops"))], map: "User_phone_prefix_idx")
+  @@index([lastSeenAt], map: "User_lastSeenAt_idx")
 }
 
 model Product {
@@ -101,7 +104,8 @@ model Product {
 
 // Customer catalogue merchandise. The admin route synchronizes its editable
 // task fields into Product, while this model remains unrelated to OrderItem so
-// past order references stay stable.
+// past order references stay stable. `active` controls public storefront
+// visibility only; the synchronized Product remains assignable until deleted.
 model CatalogProduct {
   id          String   @id @default(cuid())
   code        String   @unique @db.VarChar(40)

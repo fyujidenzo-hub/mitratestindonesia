@@ -39,12 +39,37 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     refresh();
   }, []);
 
+  useEffect(() => {
+    if (user?.role !== "CUSTOMER") return;
+
+    const heartbeat = () => {
+      if (document.visibilityState === "visible") {
+        void api("/customer/session/heartbeat", { method: "POST" }).catch(() => undefined);
+      }
+    };
+    const onVisibilityChange = () => heartbeat();
+
+    heartbeat();
+    const interval = window.setInterval(heartbeat, 15_000);
+    document.addEventListener("visibilitychange", onVisibilityChange);
+    window.addEventListener("focus", heartbeat);
+
+    return () => {
+      window.clearInterval(interval);
+      document.removeEventListener("visibilitychange", onVisibilityChange);
+      window.removeEventListener("focus", heartbeat);
+    };
+  }, [user?.id, user?.role]);
+
   const value = useMemo<AuthValue>(() => ({
     user,
     loading,
     refresh,
     setUser,
     logout: async (area: SessionArea = currentSessionArea()) => {
+      if (area === "customer" && user?.role === "CUSTOMER") {
+        await api("/customer/session/offline", { method: "POST" }).catch(() => undefined);
+      }
       await api("/auth/logout", { method: "POST", body: JSON.stringify({ area }) });
       setUser(null);
     },

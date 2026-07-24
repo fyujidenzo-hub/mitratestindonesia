@@ -1,4 +1,4 @@
-import { AlertTriangle, BadgeDollarSign, Banknote, Boxes, Check, ChevronDown, ChevronLeft, ChevronRight, ClipboardList, ExternalLink, Eye, LayoutDashboard, LockKeyhole, LogOut, Menu, PackageCheck, PackagePlus, Pencil, Plus, Power, RefreshCw, Search, Send, Settings2, ShieldCheck, ShoppingBag, Trash2, UserCog, UserPlus, Users, WalletCards, X } from "lucide-react";
+import { AlertTriangle, BadgeDollarSign, Banknote, Boxes, Check, ChevronDown, ChevronLeft, ChevronRight, ClipboardList, ExternalLink, Eye, Gift, LayoutDashboard, LockKeyhole, LogOut, Menu, PackageCheck, PackagePlus, Pencil, Plus, Power, RefreshCw, Search, Send, Settings2, ShieldCheck, ShoppingBag, Trash2, UserCog, UserPlus, Users, WalletCards, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Brand } from "../components/Brand";
@@ -7,12 +7,13 @@ import { api, dateTime, money } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { LanguageSwitcher, translateText, useI18n, type Language } from "../lib/i18n";
 import { calculateCommission, commissionPercent, membershipLabel } from "../lib/commission";
+import { rewardSettingsFromSiteValues, type RewardSettings } from "../lib/rewards";
 import type { Bank, CatalogBanner, CatalogProduct, Order, Product, Transaction, User, UserLevel } from "../types";
 
 type AdminData = { members: User[]; transactions: Transaction[]; orders: Order[]; taskProducts: Product[]; catalogProducts: CatalogProduct[]; catalogBanners: CatalogBanner[]; banks: Bank[]; staff: User[]; settings: Record<string, string> };
-type Tab = "overview" | "members" | "tasks" | "topups" | "withdrawals" | "catalog" | "settings" | "staff";
+type Tab = "overview" | "members" | "tasks" | "topups" | "withdrawals" | "catalog" | "rewards" | "settings" | "staff";
 const tabs: Array<{ key: Tab; label: string; icon: typeof LayoutDashboard; superOnly?: boolean }> = [
-  { key: "overview", label: "Overview", icon: LayoutDashboard }, { key: "members", label: "Members", icon: Users }, { key: "tasks", label: "Tasks & Orders", icon: ClipboardList }, { key: "topups", label: "Top-up", icon: BadgeDollarSign }, { key: "withdrawals", label: "Withdrawal", icon: Banknote }, { key: "catalog", label: "Catalog", icon: Boxes, superOnly: true }, { key: "settings", label: "Settings", icon: Settings2, superOnly: true }, { key: "staff", label: "Admin Team", icon: UserCog, superOnly: true },
+  { key: "overview", label: "Overview", icon: LayoutDashboard }, { key: "members", label: "Members", icon: Users }, { key: "tasks", label: "Tasks & Orders", icon: ClipboardList }, { key: "topups", label: "Top-up", icon: BadgeDollarSign }, { key: "withdrawals", label: "Withdrawal", icon: Banknote }, { key: "catalog", label: "Catalog", icon: Boxes, superOnly: true }, { key: "rewards", label: "Rewards", icon: Gift, superOnly: true }, { key: "settings", label: "Settings", icon: Settings2, superOnly: true }, { key: "staff", label: "Admin Team", icon: UserCog, superOnly: true },
 ];
 
 function storageLevelForMember(level: UserLevel): UserLevel {
@@ -56,6 +57,7 @@ export default function AdminPage() {
         {tab === "topups" && <Topups transactions={filteredTopups} canReview={user?.role === "SUPER_ADMIN"} perform={perform} />}
         {tab === "withdrawals" && <Withdrawals transactions={filteredWithdrawals} canReview={user?.role === "SUPER_ADMIN"} perform={perform} />}
         {tab === "catalog" && <Catalog products={filteredCatalogProducts} banners={filteredCatalogBanners} productCodes={data?.catalogProducts.map((product) => product.code) ?? []} bannerCodes={data?.catalogBanners.map((banner) => banner.code) ?? []} perform={perform} />}
+        {tab === "rewards" && <RewardSettingsPanel settings={data?.settings ?? {}} perform={perform} />}
         {tab === "settings" && <SupportSettings supportUrl={data?.settings?.supportUrl ?? ""} perform={perform} />}
         {tab === "staff" && <Staff staff={filteredStaff} perform={perform} />}
       </div></main>
@@ -126,6 +128,117 @@ function Overview({ members, totalBalance, pendingTopups, pendingWithdrawals, pe
   return <><div className="mt-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-4"><Metric icon={<Users />} label="Total members" value={String(members)} tone="orange" /><Metric icon={<WalletCards />} label="Total balance" value={money(totalBalance)} tone="green" /><Metric icon={<Banknote />} label="Finance requests" value={String(pendingTopups + pendingWithdrawals)} tone="blue" /><Metric icon={<ClipboardList />} label="Tasks awaiting assignment" value={String(pendingTasks)} tone="purple" /></div><div className="mt-5 grid gap-5 xl:grid-cols-2"><Card className="overflow-hidden"><SectionTitle title="Latest requests" subtitle="Top-ups and withdrawals that need attention" /><div className="divide-y divide-slate-100">{transactions.slice(0, 6).map((item) => <div key={item.id} className="flex items-center gap-3 p-4"><span className={`grid h-10 w-10 place-items-center rounded-xl ${item.type === "TOPUP" ? "bg-shopee-50 text-shopee-500" : "bg-sky-50 text-sky-600"}`}>{item.type === "TOPUP" ? <BadgeDollarSign size={19} /> : <Banknote size={19} />}</span><div className="min-w-0 flex-1"><p className="truncate text-sm font-black">{item.user?.displayName} · {item.type}</p><p className="text-xs font-semibold text-slate-400">{money(item.amount)}</p></div><StatusPill status={item.status} /></div>)}</div></Card><Card className="overflow-hidden"><SectionTitle title="Task activity" subtitle="Latest customer task statuses" /><div className="divide-y divide-slate-100">{orders.slice(0, 6).map((item) => <div key={item.id} className="flex items-center gap-3 p-4"><span className="grid h-10 w-10 place-items-center rounded-xl bg-violet-50 text-violet-600"><PackageCheck size={19} /></span><div className="min-w-0 flex-1"><p className="truncate text-sm font-black">{item.user?.displayName} · {item.items[0]?.productName || "Waiting for product"}</p><p className="text-xs font-semibold text-slate-400">{item.referenceNumber}</p></div><StatusPill status={item.status} /></div>)}</div></Card></div></>;
 }
 
+function RewardSettingsPanel({ settings, perform }: { settings: Record<string, string>; perform: (path: string, body: unknown, success: string, method?: string) => Promise<boolean> }) {
+  const configured = useMemo(
+    () => rewardSettingsFromSiteValues(settings),
+    [settings.rewardMilestones, settings.rewardTerms],
+  );
+  const [draft, setDraft] = useState<RewardSettings>(configured);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => setDraft(configured), [configured]);
+
+  const valid = draft.milestones.every((milestone) => Number.isSafeInteger(milestone.amount) && milestone.amount >= 0 && milestone.amount <= 1_000_000_000)
+    && draft.terms.trim().length > 0
+    && draft.terms.trim().length <= 5000;
+  const changed = JSON.stringify(draft) !== JSON.stringify(configured);
+
+  const updateAmount = (task: number, value: string) => {
+    const amount = value === "" ? -1 : Number(value.replace(/\D/g, ""));
+    setDraft((current) => ({
+      ...current,
+      milestones: current.milestones.map((milestone) => milestone.task === task ? { ...milestone, amount } : milestone),
+    }));
+  };
+
+  const save = async () => {
+    if (!valid || !changed || saving) return;
+    setSaving(true);
+    await perform(
+      "/admin/settings/rewards",
+      { milestones: draft.milestones, terms: draft.terms.trim() },
+      "Reward amounts and terms updated.",
+      "PATCH",
+    );
+    setSaving(false);
+  };
+
+  return (
+    <div className="mt-6 grid gap-5 xl:grid-cols-[minmax(0,1.2fr)_minmax(320px,.8fr)]">
+      <Card className="overflow-hidden">
+        <div className="border-b border-orange-100 bg-gradient-to-r from-orange-50 to-white p-5 sm:p-6">
+          <div className="flex items-center gap-4">
+            <span className="grid h-12 w-12 place-items-center rounded-2xl bg-shopee-500 text-white shadow-lg shadow-shopee-500/20"><Gift size={22} /></span>
+            <div>
+              <p className="text-[10px] font-black uppercase tracking-[.16em] text-shopee-500">Reward program settings</p>
+              <h2 className="mt-1 text-xl font-black text-slate-900">Milestone rewards</h2>
+              <p className="mt-1 text-xs font-semibold text-slate-500">Changes apply to future task completions. Previously earned rewards remain unchanged.</p>
+            </div>
+          </div>
+        </div>
+        <div className="p-5 sm:p-6">
+          <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-3">
+            {draft.milestones.map((milestone) => (
+              <Field key={milestone.task} label={`Task ${milestone.task} reward`} hint={`Credited after completing task ${milestone.task}.`}>
+                <div className="relative">
+                  <span className="absolute left-4 top-1/2 -translate-y-1/2 text-sm font-black text-slate-400">Rp</span>
+                  <input
+                    inputMode="numeric"
+                    className={`${inputClass} pl-11`}
+                    value={milestone.amount < 0 ? "" : milestone.amount}
+                    onChange={(event) => updateAmount(milestone.task, event.target.value)}
+                    aria-label={`Task ${milestone.task} reward amount`}
+                  />
+                </div>
+              </Field>
+            ))}
+          </div>
+
+          <div className="mt-5">
+            <Field label="Terms and conditions" hint="Shown immediately to customers on the Usage & transaction history page.">
+              <textarea
+                className={`${inputClass} min-h-36 resize-y py-3 leading-6`}
+                value={draft.terms}
+                maxLength={5000}
+                onChange={(event) => setDraft((current) => ({ ...current, terms: event.target.value }))}
+                placeholder="Enter the reward program terms and conditions."
+              />
+            </Field>
+            <p className="mt-2 text-right text-[11px] font-bold text-slate-400">{draft.terms.length} / 5000</p>
+          </div>
+
+          {!valid && <p className="mt-3 text-xs font-bold text-rose-600">Enter a valid amount from Rp 0 to Rp 1,000,000,000 for every milestone and add the terms and conditions.</p>}
+          <div className="mt-5 flex justify-end">
+            <Button loading={saving} disabled={!valid || !changed} onClick={save}><Check size={16} /> Save reward settings</Button>
+          </div>
+        </div>
+      </Card>
+
+      <Card className="overflow-hidden">
+        <div className="bg-slate-950 p-5 text-white">
+          <p className="text-[10px] font-black uppercase tracking-[.16em] text-orange-300">Customer preview</p>
+          <h2 className="mt-1 text-xl font-black">Reward program</h2>
+        </div>
+        <div className="divide-y divide-slate-100">
+          {draft.milestones.map((milestone) => (
+            <div key={milestone.task} className="flex items-center justify-between gap-4 px-5 py-4">
+              <div>
+                <p className="text-sm font-black text-slate-900">Complete task {milestone.task}</p>
+                <p className="mt-1 text-[11px] font-semibold text-slate-400">Automatic milestone credit</p>
+              </div>
+              <p className="text-sm font-black text-shopee-600">{milestone.amount >= 0 ? money(milestone.amount) : "—"}</p>
+            </div>
+          ))}
+        </div>
+        <div className="border-t border-orange-100 bg-orange-50/60 p-5">
+          <p className="text-[10px] font-black uppercase tracking-wide text-shopee-500">Terms and conditions</p>
+          <p className="mt-2 whitespace-pre-line text-sm font-semibold leading-6 text-slate-600">{draft.terms || "No terms entered."}</p>
+        </div>
+      </Card>
+    </div>
+  );
+}
+
 function SupportSettings({ supportUrl, perform }: { supportUrl: string; perform: (path: string, body: unknown, success: string, method?: string) => Promise<boolean> }) {
   const [value, setValue] = useState(supportUrl);
   const [saving, setSaving] = useState(false);
@@ -163,11 +276,70 @@ function shortfallForMember(member: User, orders: Order[]) {
   return Math.max(0, ...orders.filter((order) => order.userId === member.id && activeOrderStatuses.includes(order.status)).map((order) => order.requiredBalance - member.balance));
 }
 
+function MemberPresenceBadge({ online }: { online: boolean }) {
+  return <span key={online ? "online" : "offline"} className={`inline-flex items-center gap-2 rounded-full px-2.5 py-1 text-[10px] font-black uppercase tracking-wide ${online ? "bg-emerald-50 text-emerald-700 ring-1 ring-emerald-100" : "bg-slate-100 text-slate-500"}`}><span className={`h-2 w-2 rounded-full ${online ? "bg-emerald-500 shadow-[0_0_0_4px_rgba(16,185,129,.12)]" : "bg-slate-300"}`} />{online ? "Online" : "Offline"}</span>;
+}
+
 function Members({ members, orders, canManage, canManageSecurity, canManageWithdrawals, perform }: { members: User[]; orders: Order[]; canManage: boolean; canManageSecurity: boolean; canManageWithdrawals: boolean; perform: (path: string, body: unknown, success: string, method?: string) => Promise<boolean> }) {
   const [viewing, setViewing] = useState<User | null>(null);
   const [reward, setReward] = useState<{ user: User; amount: string } | null>(null);
   const [access, setAccess] = useState<{ user: User; level: UserLevel; active: boolean; withdrawalLocked?: boolean; accountPassword?: string; withdrawalPassword?: string; remarks?: string } | null>(null);
   const [busy, setBusy] = useState(false);
+  const [phoneQuery, setPhoneQuery] = useState("");
+  const [phoneResults, setPhoneResults] = useState<User[] | null>(null);
+  const [phoneSearchLoading, setPhoneSearchLoading] = useState(false);
+  const [phoneSearchError, setPhoneSearchError] = useState("");
+  const phoneSearchRequest = useRef(0);
+  const [onlineMemberIds, setOnlineMemberIds] = useState<Set<string>>(new Set());
+
+  useEffect(() => {
+    const phone = phoneQuery.trim();
+    const requestId = ++phoneSearchRequest.current;
+    setPhoneSearchError("");
+
+    if (!phone) {
+      setPhoneResults(null);
+      setPhoneSearchLoading(false);
+      return;
+    }
+
+    setPhoneSearchLoading(true);
+    const timer = window.setTimeout(async () => {
+      try {
+        const result = await api<{ members: User[] }>(`/admin/members/search?phone=${encodeURIComponent(phone)}`);
+        if (phoneSearchRequest.current === requestId) setPhoneResults(result.members);
+      } catch (error) {
+        if (phoneSearchRequest.current === requestId) {
+          setPhoneResults([]);
+          setPhoneSearchError(error instanceof Error ? error.message : "Phone search failed.");
+        }
+      } finally {
+        if (phoneSearchRequest.current === requestId) setPhoneSearchLoading(false);
+      }
+    }, 250);
+
+    return () => window.clearTimeout(timer);
+  }, [phoneQuery]);
+
+  useEffect(() => {
+    let active = true;
+
+    const loadPresence = async () => {
+      try {
+        const result = await api<{ onlineMembers: Array<{ id: string; lastSeenAt: string }> }>("/admin/members/presence");
+        if (active) setOnlineMemberIds(new Set(result.onlineMembers.map((member) => member.id)));
+      } catch {
+        // Keep the most recent presence snapshot during brief network errors.
+      }
+    };
+
+    void loadPresence();
+    const interval = window.setInterval(loadPresence, 10_000);
+    return () => {
+      active = false;
+      window.clearInterval(interval);
+    };
+  }, []);
 
   const saveAccess = async () => {
     if (!access) return;
@@ -191,8 +363,9 @@ function Members({ members, orders, canManage, canManageSecurity, canManageWithd
     && (!access.withdrawalPassword || /^\d{6}$/.test(access.withdrawalPassword))
     && (!securityResetRequested || (access.remarks?.trim().length ?? 0) >= 3),
   );
+  const displayedMembers = phoneQuery.trim() ? (phoneResults ?? []) : members;
 
-  return <><Card className="mt-6 overflow-hidden"><div className="flex flex-col gap-2 border-b border-slate-100 p-4 sm:flex-row sm:items-center sm:justify-between"><div><p className="font-black text-slate-900">Member directory</p><p className="mt-1 text-xs font-semibold text-slate-400">{members.length} accounts · Promo ownership, balances, membership, and access activity</p></div><span className="w-fit rounded-full bg-slate-100 px-3 py-1.5 text-[10px] font-black uppercase tracking-wide text-slate-500">{canManage ? "Super Admin controls" : canManageSecurity ? "Admin member controls" : "Admin monitoring"}</span></div><div className="grid gap-3 p-3 md:hidden">{members.map((member) => { const shortfall = shortfallForMember(member, orders); return <MobileRecordCard key={member.id} title={member.displayName} subtitle={`@${member.username} · ${member.phone || "No phone"}`} badge={<span className={`rounded-full px-2 py-1 text-[9px] font-black uppercase ${member.isActive === false ? "bg-rose-50 text-rose-700" : "bg-emerald-50 text-emerald-700"}`}>{member.isActive === false ? "Inactive" : "Active"}</span>} actions={<><Button variant="ghost" className="h-9 flex-1 px-3 text-xs" onClick={() => setViewing(member)}><Eye size={14} /> View</Button>{canManageSecurity && <Button variant="secondary" className="h-9 flex-1 px-3 text-xs" onClick={() => setAccess({ user: member, level: member.level, active: member.isActive !== false })}><UserCog size={14} /> Manage</Button>}</>}><MobileRecordField label="Promo code">{member.referrer?.invitationCode || "—"}</MobileRecordField><MobileRecordField label="Administrator">{member.referrer?.displayName || "Not linked"}</MobileRecordField><MobileRecordField label="Shortfall"><span className={shortfall > 0 ? "text-rose-600" : "text-emerald-600"}>{money(shortfall)}</span></MobileRecordField><MobileRecordField label="Orders">{member.totalOrders}</MobileRecordField><MobileRecordField label="Level">{membershipLabel(member.level)}</MobileRecordField><MobileRecordField label="Last login">{member.lastLoginAt ? dateTime(member.lastLoginAt) : "Never"}</MobileRecordField></MobileRecordCard>; })}{!members.length && <p className="py-8 text-center text-sm font-bold text-slate-400">No members match the current search.</p>}</div><div className="hidden overflow-x-auto md:block"><table className="w-full min-w-[1240px]"><caption className="sr-only">Member account management</caption><thead><tr><th className={tableHeadClass}>Promo Code</th><th className={tableHeadClass}>User</th><th className={tableHeadClass}>Name / Account</th><th className={tableHeadClass}>Shortfall</th><th className={tableHeadClass}>Orders</th><th className={tableHeadClass}>Level</th><th className={tableHeadClass}>Last Login</th><th className={`${tableHeadClass} sticky right-0 z-10 shadow-[-8px_0_16px_-16px_rgba(15,23,42,.7)]`}>Action</th></tr></thead><tbody>{members.map((member) => { const shortfall = shortfallForMember(member, orders); return <tr key={member.id} className="group bg-white transition hover:bg-orange-50/30"><td className={tableCellClass}><span className="rounded-lg bg-shopee-50 px-2.5 py-1.5 font-black text-shopee-600">{member.referrer?.invitationCode || "—"}</span></td><td className={tableCellClass}><p className="font-black text-slate-900">@{member.username}</p><p className="mt-1 text-[10px] text-slate-400">{member.isActive === false ? "Access disabled" : "Active user"}</p></td><td className={tableCellClass}><p className="font-black text-slate-900">{member.displayName}</p><p className="mt-1 text-[10px] text-slate-400">{member.phone || "No phone"} · {member.referrer?.displayName || "No administrator"}</p></td><td className={tableCellClass}><span className={`font-black ${shortfall > 0 ? "text-rose-600" : "text-emerald-600"}`}>{money(shortfall)}</span></td><td className={tableCellClass}><span className="font-black text-slate-900">{member.totalOrders}</span></td><td className={tableCellClass}><span className="rounded-full bg-violet-50 px-2.5 py-1 font-black text-violet-700">{membershipLabel(member.level)}</span></td><td className={tableCellClass}>{member.lastLoginAt ? dateTime(member.lastLoginAt) : <span className="text-slate-400">Never</span>}</td><td className={`${tableCellClass} sticky right-0 bg-white shadow-[-8px_0_16px_-16px_rgba(15,23,42,.7)] group-hover:bg-orange-50/30`}><div className="flex justify-end gap-2"><Button variant="ghost" className="h-9 px-3 text-xs" onClick={() => setViewing(member)}><Eye size={14} /> View</Button>{canManageSecurity && <Button variant="secondary" className="h-9 px-3 text-xs" onClick={() => setAccess({ user: member, level: member.level, active: member.isActive !== false })}><UserCog size={14} /> Manage</Button>}</div></td></tr>; })}{!members.length && <tr><td colSpan={8} className="px-6 py-12 text-center text-sm font-bold text-slate-400">No members match the current search.</td></tr>}</tbody></table></div></Card>
+  return <><Card className="mt-6 overflow-hidden"><div className="flex flex-col gap-2 border-b border-slate-100 p-4 sm:flex-row sm:items-center sm:justify-between"><div><p className="font-black text-slate-900">Member directory</p><p className="mt-1 text-xs font-semibold text-slate-400">{displayedMembers.length} accounts · Promo ownership, balances, membership, and access activity</p></div><span className="w-fit rounded-full bg-slate-100 px-3 py-1.5 text-[10px] font-black uppercase tracking-wide text-slate-500">{canManage ? "Super Admin controls" : canManageSecurity ? "Admin member controls" : "Admin monitoring"}</span></div><div className="border-b border-slate-100 bg-slate-50/60 p-4"><label htmlFor="member-phone-search" className="text-xs font-black uppercase tracking-wide text-slate-600">Search by phone number</label><div className="relative mt-2 max-w-xl"><Search size={17} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" /><input id="member-phone-search" type="tel" inputMode="tel" autoComplete="off" value={phoneQuery} onChange={(event) => setPhoneQuery(event.target.value)} className={`${inputClass} pl-10 ${phoneQuery ? "pr-11" : ""}`} placeholder="Enter a member phone number" />{phoneQuery && <button type="button" aria-label="Clear phone search" onClick={() => setPhoneQuery("")} className="absolute right-2.5 top-1/2 grid h-8 w-8 -translate-y-1/2 place-items-center rounded-lg text-slate-400 transition hover:bg-white hover:text-slate-700"><X size={16} /></button>}</div><div className="mt-2 min-h-4 text-xs font-semibold">{phoneSearchLoading ? <span className="text-shopee-500">Searching members…</span> : phoneSearchError ? <span className="text-rose-600">{phoneSearchError}</span> : phoneQuery.trim() ? <span className="text-slate-400">{displayedMembers.length ? "Matching accounts are shown below." : "No account found for this phone number."}</span> : <span className="text-slate-400">Results update automatically while you type.</span>}</div></div><div className="grid gap-3 p-3 md:hidden">{displayedMembers.map((member) => { const shortfall = shortfallForMember(member, orders); return <MobileRecordCard key={member.id} title={member.displayName} subtitle={`@${member.username} · ${member.phone || "No phone"}`} badge={<span className={`rounded-full px-2 py-1 text-[9px] font-black uppercase ${member.isActive === false ? "bg-rose-50 text-rose-700" : "bg-emerald-50 text-emerald-700"}`}>{member.isActive === false ? "Inactive" : "Active"}</span>} actions={<><Button variant="ghost" className="h-9 flex-1 px-3 text-xs" onClick={() => setViewing(member)}><Eye size={14} /> View</Button>{canManageSecurity && <Button variant="secondary" className="h-9 flex-1 px-3 text-xs" onClick={() => setAccess({ user: member, level: member.level, active: member.isActive !== false })}><UserCog size={14} /> Manage</Button>}</>}><MobileRecordField label="Promo code">{member.referrer?.invitationCode || "—"}</MobileRecordField><MobileRecordField label="Administrator">{member.referrer?.displayName || "Not linked"}</MobileRecordField><MobileRecordField label="Shortfall"><span className={shortfall > 0 ? "text-rose-600" : "text-emerald-600"}>{money(shortfall)}</span></MobileRecordField><MobileRecordField label="Orders">{member.totalOrders}</MobileRecordField><MobileRecordField label="Level">{membershipLabel(member.level)}</MobileRecordField><MobileRecordField label="Active session"><MemberPresenceBadge online={onlineMemberIds.has(member.id)} /></MobileRecordField><MobileRecordField label="Last login">{member.lastLoginAt ? dateTime(member.lastLoginAt) : "Never"}</MobileRecordField></MobileRecordCard>; })}{!displayedMembers.length && <p className="py-8 text-center text-sm font-bold text-slate-400">No members match the current search.</p>}</div><div className="hidden overflow-x-auto md:block"><table className="w-full min-w-[1360px]"><caption className="sr-only">Member account management</caption><thead><tr><th className={tableHeadClass}>Promo Code</th><th className={tableHeadClass}>User</th><th className={tableHeadClass}>Name / Account</th><th className={tableHeadClass}>Shortfall</th><th className={tableHeadClass}>Orders</th><th className={tableHeadClass}>Level</th><th className={tableHeadClass}>Active Session</th><th className={tableHeadClass}>Last Login</th><th className={`${tableHeadClass} sticky right-0 z-10 shadow-[-8px_0_16px_-16px_rgba(15,23,42,.7)]`}>Action</th></tr></thead><tbody>{displayedMembers.map((member) => { const shortfall = shortfallForMember(member, orders); return <tr key={member.id} className="group bg-white transition hover:bg-orange-50/30"><td className={tableCellClass}><span className="rounded-lg bg-shopee-50 px-2.5 py-1.5 font-black text-shopee-600">{member.referrer?.invitationCode || "—"}</span></td><td className={tableCellClass}><p className="font-black text-slate-900">@{member.username}</p><p className="mt-1 text-[10px] text-slate-400">{member.isActive === false ? "Access disabled" : "Active user"}</p></td><td className={tableCellClass}><p className="font-black text-slate-900">{member.displayName}</p><p className="mt-1 text-[10px] text-slate-400">{member.phone || "No phone"} · {member.referrer?.displayName || "No administrator"}</p></td><td className={tableCellClass}><span className={`font-black ${shortfall > 0 ? "text-rose-600" : "text-emerald-600"}`}>{money(shortfall)}</span></td><td className={tableCellClass}><span className="font-black text-slate-900">{member.totalOrders}</span></td><td className={tableCellClass}><span className="rounded-full bg-violet-50 px-2.5 py-1 font-black text-violet-700">{membershipLabel(member.level)}</span></td><td className={tableCellClass}><MemberPresenceBadge online={onlineMemberIds.has(member.id)} /></td><td className={tableCellClass}>{member.lastLoginAt ? dateTime(member.lastLoginAt) : <span className="text-slate-400">Never</span>}</td><td className={`${tableCellClass} sticky right-0 bg-white shadow-[-8px_0_16px_-16px_rgba(15,23,42,.7)] group-hover:bg-orange-50/30`}><div className="flex justify-end gap-2"><Button variant="ghost" className="h-9 px-3 text-xs" onClick={() => setViewing(member)}><Eye size={14} /> View</Button>{canManageSecurity && <Button variant="secondary" className="h-9 px-3 text-xs" onClick={() => setAccess({ user: member, level: member.level, active: member.isActive !== false })}><UserCog size={14} /> Manage</Button>}</div></td></tr>; })}{!displayedMembers.length && <tr><td colSpan={9} className="px-6 py-12 text-center text-sm font-bold text-slate-400">No members match the current search.</td></tr>}</tbody></table></div></Card>
 
     {viewing && <Modal title="Member account details" onClose={() => setViewing(null)} wide><div className="flex items-center gap-4 rounded-3xl bg-slate-950 p-5 text-white"><span className="grid h-14 w-14 shrink-0 place-items-center rounded-2xl bg-white/10 font-black">{viewing.displayName.slice(0, 2).toUpperCase()}</span><div className="min-w-0"><div className="flex flex-wrap items-center gap-2"><h3 className="truncate text-xl font-black">{viewing.displayName}</h3><span className={`rounded-full px-2 py-1 text-[9px] font-black uppercase ${viewing.isActive === false ? "bg-rose-400/15 text-rose-300" : "bg-emerald-400/15 text-emerald-300"}`}>{viewing.isActive === false ? "Inactive" : "Active"}</span></div><p className="mt-1 text-sm font-semibold text-slate-300">@{viewing.username} · {membershipLabel(viewing.level)}</p></div></div><div className="mt-5 grid gap-3 sm:grid-cols-2"><StaffDetail label="Promo code" value={viewing.referrer?.invitationCode || "Not linked"} /><StaffDetail label="Administrator" value={viewing.referrer?.displayName || "Not linked"} /><StaffDetail label="Phone number" value={viewing.phone || "Not provided"} /><StaffDetail label="Account balance" value={money(viewing.balance)} /><StaffDetail label="Orders" value={String(viewing.totalOrders)} /><StaffDetail label="Balance shortfall" value={money(shortfallForMember(viewing, orders))} /><StaffDetail label="Last login" value={viewing.lastLoginAt ? dateTime(viewing.lastLoginAt) : "Never"} /><StaffDetail label="Withdrawal access" value={viewing.withdrawalLocked ? "Closed" : "Open"} /></div><div className="mt-6 flex flex-col-reverse gap-2 sm:flex-row sm:flex-wrap sm:justify-end"><Button variant="ghost" onClick={() => setViewing(null)}>Close</Button>{canManageWithdrawals && <Button variant={viewing.withdrawalLocked ? "secondary" : "danger"} onClick={async () => { const member = viewing; const succeeded = await perform(`/admin/members/${member.id}/withdrawal-lock`, { locked: !member.withdrawalLocked, remarks: !member.withdrawalLocked ? "Withdrawals closed by an administrator." : "" }, member.withdrawalLocked ? "Member withdrawals opened." : "Member withdrawals closed.", "PATCH"); if (succeeded) setViewing(null); }}><LockKeyhole size={16} /> {viewing.withdrawalLocked ? "Open withdrawals" : "Close withdrawals"}</Button>}{canManage && <><Button variant="secondary" onClick={() => { setReward({ user: viewing, amount: "50000" }); setViewing(null); }}><BadgeDollarSign size={16} /> Add bonus</Button><Button onClick={() => { setAccess({ user: viewing, level: viewing.level, active: viewing.isActive !== false }); setViewing(null); }}><UserCog size={16} /> Manage access</Button></>}</div></Modal>}
 
@@ -560,14 +733,14 @@ function Catalog({ products, banners, productCodes, bannerCodes, perform }: { pr
     </div>
 
     {section === "banners" ? <BannerManager banners={banners} bannerCodes={bannerCodes} perform={perform} createRequest={bannerCreateRequest} /> : <>
-      <div className="mt-4 flex items-end justify-between gap-4 px-1"><div><p className="text-[10px] font-black uppercase tracking-[.15em] text-shopee-500">Product gallery</p><h2 className="mt-0.5 text-lg font-black text-slate-900">Storefront products</h2><p className="mt-1 text-xs font-semibold text-slate-500">Sorted by price automatically.</p></div><p className="hidden text-xs font-bold text-slate-400 sm:block">{products.length} items</p></div>
+      <div className="mt-4 flex items-end justify-between gap-4 px-1"><div><p className="text-[10px] font-black uppercase tracking-[.15em] text-shopee-500">Product gallery</p><h2 className="mt-0.5 text-lg font-black text-slate-900">Storefront products</h2><p className="mt-1 text-xs font-semibold text-slate-500">Choose which saved products appear publicly. Every saved product remains available for task assignment.</p></div><p className="hidden text-xs font-bold text-slate-400 sm:block">{products.length} items</p></div>
 
       {products.length ? <div className="mt-3 grid gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">{products.map((product) => <Card key={product.id} className="group overflow-hidden"><button type="button" onClick={() => setViewing(product)} className="relative block aspect-[16/9] w-full overflow-hidden bg-slate-100 text-left" aria-label={`View ${product.name}`}><PackagePlus className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 text-slate-300" size={30} /><img src={product.imageUrl} alt={product.name} className="relative h-full w-full object-cover transition duration-500 group-hover:scale-105" onError={(event) => event.currentTarget.classList.add("hidden")} /></button><div className="p-3"><div className="flex items-start justify-between gap-2"><div className="min-w-0"><p className="truncate text-[9px] font-black uppercase tracking-wide text-shopee-500">{product.category} · {product.code}</p><h3 className="mt-1 truncate text-sm font-black">{product.name}</h3></div><StatusPill status={product.active ? "ACTIVE" : "INACTIVE"} /></div><p className="mt-2 text-sm font-black text-shopee-500">{money(product.price)}</p><div className="mt-3 grid grid-cols-3 gap-1.5 border-t border-slate-100 pt-3"><Button variant="ghost" className="h-9 px-1 text-[11px]" onClick={() => setViewing(product)}><Eye size={14} /> View</Button><Button variant="secondary" className="h-9 px-1 text-[11px]" onClick={() => beginEdit(product)}><Pencil size={14} /> Edit</Button><Button variant="danger" className="h-9 px-1 text-[11px]" onClick={() => setDeleting(product)}><Trash2 size={14} /> Delete</Button></div></div></Card>)}</div> : <Card className="mt-4 grid place-items-center p-10 text-center"><span className="grid h-16 w-16 place-items-center rounded-3xl bg-shopee-50 text-shopee-500"><PackagePlus size={30} /></span><h2 className="mt-5 text-xl font-black">No catalog products found</h2><p className="mt-2 text-sm font-semibold text-slate-500">Add a product or clear the catalog search.</p><Button className="mt-5" onClick={beginCreateProduct}><Plus size={18} /> Add product</Button></Card>}
     </>}
 
     {viewing && <Modal title="Catalog product details" onClose={() => setViewing(null)} wide><div className="overflow-hidden rounded-3xl bg-slate-100"><img src={viewing.imageUrl} alt={viewing.name} className="aspect-[16/8] w-full object-cover" /></div><div className="mt-5 flex flex-wrap items-center gap-2"><StatusPill status={viewing.active ? "ACTIVE" : "INACTIVE"} /><span className="rounded-full bg-slate-100 px-3 py-1 text-[11px] font-black uppercase tracking-wide text-slate-500">{viewing.category}</span></div><h3 className="mt-4 text-2xl font-black text-slate-900">{viewing.name}</h3><p className="mt-2 text-sm font-semibold leading-6 text-slate-500">{viewing.description || "No product description has been added."}</p><div className="mt-5 grid gap-3 sm:grid-cols-2"><ProductDetail label="Price" value={money(viewing.price)} /><ProductDetail label="Product code" value={viewing.code} /></div><div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end"><Button variant="ghost" onClick={() => setViewing(null)}>Close</Button><Button onClick={() => beginEdit(viewing)}><Pencil size={17} /> Edit product</Button></div></Modal>}
 
-    {editing && draft && <Modal title={editing.mode === "create" ? "Add catalog product" : "Edit catalog product"} onClose={() => !busy && setEditing(null)} wide><form onSubmit={(event) => { event.preventDefault(); saveCatalogProduct(); }}><div className="grid items-start gap-4 sm:grid-cols-2"><GeneratedCodeField label="Product code" hint={editing.mode === "create" ? "Generated automatically. You may edit it before saving." : "Unique code using letters, numbers, dots, dashes, or underscores."} value={draft.code} onChange={(value) => updateDraft("code", value)} placeholder="CAT-ITEM-01" onRegenerate={editing.mode === "create" ? () => updateDraft("code", nextSequentialCode([...productCodes, draft.code], "CAT-ITEM-", 2)) : undefined} /><label className="grid self-start gap-2 text-sm font-extrabold text-slate-700"><span>Category</span><span className="relative"><select required className={`${inputClass} cursor-pointer appearance-none pr-10`} value={draft.category} onChange={(event) => updateDraft("category", event.target.value)}><option value="" disabled>Select a category</option>{categoryOptions.map((category) => <option key={category} value={category}>{category}</option>)}</select><ChevronDown aria-hidden="true" size={17} className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 text-slate-400" /></span><span className="text-xs font-medium text-slate-400">Choose the storefront section for this product.</span></label><div className="sm:col-span-2"><Field label="Product name"><input required maxLength={180} className={inputClass} value={draft.name} onChange={(event) => updateDraft("name", event.target.value)} placeholder="Product name" /></Field></div><div className="sm:col-span-2"><Field label="Description" hint="Optional storefront product details."><textarea maxLength={5000} className={`${inputClass} min-h-24 resize-y py-3`} value={draft.description} onChange={(event) => updateDraft("description", event.target.value)} placeholder="Add a short product description" /></Field></div><Field label="Price (IDR)"><input required min="1" max="1000000000000" step="1" type="number" className={inputClass} value={draft.price} onChange={(event) => updateDraft("price", event.target.value)} placeholder="189000" /></Field><div className="sm:col-span-2"><Field label="Image URL or asset path" hint="Use https://... or an existing /assets/... path."><input required maxLength={2000} className={inputClass} value={draft.imageUrl} onChange={(event) => updateDraft("imageUrl", event.target.value)} placeholder="https://images.unsplash.com/..." /></Field></div></div>{draft.imageUrl && <div className="mt-4 overflow-hidden rounded-2xl border border-slate-200 bg-slate-50"><img src={draft.imageUrl} alt="Product preview" className="h-40 w-full object-cover" /></div>}<label className="mt-5 flex cursor-pointer items-center justify-between gap-4 rounded-2xl border border-slate-200 bg-slate-50 p-4"><span><span className="block text-sm font-black text-slate-800">Active product</span><span className="mt-1 block text-xs font-semibold text-slate-400">Active products appear in the customer product galleries.</span></span><input type="checkbox" checked={draft.active} onChange={(event) => updateDraft("active", event.target.checked)} className="h-5 w-5 accent-[#ee4d2d]" /></label><div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end"><Button type="button" variant="ghost" disabled={busy} onClick={() => setEditing(null)}>Cancel</Button><Button type="submit" loading={busy} disabled={!draftIsValid}>{editing.mode === "create" ? <><Plus size={17} /> Add product</> : <><Check size={17} /> Save changes</>}</Button></div></form></Modal>}
+    {editing && draft && <Modal title={editing.mode === "create" ? "Add catalog product" : "Edit catalog product"} onClose={() => !busy && setEditing(null)} wide><form onSubmit={(event) => { event.preventDefault(); saveCatalogProduct(); }}><div className="grid items-start gap-4 sm:grid-cols-2"><GeneratedCodeField label="Product code" hint={editing.mode === "create" ? "Generated automatically. You may edit it before saving." : "Unique code using letters, numbers, dots, dashes, or underscores."} value={draft.code} onChange={(value) => updateDraft("code", value)} placeholder="CAT-ITEM-01" onRegenerate={editing.mode === "create" ? () => updateDraft("code", nextSequentialCode([...productCodes, draft.code], "CAT-ITEM-", 2)) : undefined} /><label className="grid self-start gap-2 text-sm font-extrabold text-slate-700"><span>Category</span><span className="relative"><select required className={`${inputClass} cursor-pointer appearance-none pr-10`} value={draft.category} onChange={(event) => updateDraft("category", event.target.value)}><option value="" disabled>Select a category</option>{categoryOptions.map((category) => <option key={category} value={category}>{category}</option>)}</select><ChevronDown aria-hidden="true" size={17} className="pointer-events-none absolute right-4 top-1/2 -translate-y-1/2 text-slate-400" /></span><span className="text-xs font-medium text-slate-400">Choose the storefront section for this product.</span></label><div className="sm:col-span-2"><Field label="Product name"><input required maxLength={180} className={inputClass} value={draft.name} onChange={(event) => updateDraft("name", event.target.value)} placeholder="Product name" /></Field></div><div className="sm:col-span-2"><Field label="Description" hint="Optional storefront product details."><textarea maxLength={5000} className={`${inputClass} min-h-24 resize-y py-3`} value={draft.description} onChange={(event) => updateDraft("description", event.target.value)} placeholder="Add a short product description" /></Field></div><Field label="Price (IDR)"><input required min="1" max="1000000000000" step="1" type="number" className={inputClass} value={draft.price} onChange={(event) => updateDraft("price", event.target.value)} placeholder="189000" /></Field><div className="sm:col-span-2"><Field label="Image URL or asset path" hint="Use https://... or an existing /assets/... path."><input required maxLength={2000} className={inputClass} value={draft.imageUrl} onChange={(event) => updateDraft("imageUrl", event.target.value)} placeholder="https://images.unsplash.com/..." /></Field></div></div>{draft.imageUrl && <div className="mt-4 overflow-hidden rounded-2xl border border-slate-200 bg-slate-50"><img src={draft.imageUrl} alt="Product preview" className="h-40 w-full object-cover" /></div>}<label className={`mt-5 flex cursor-pointer items-center justify-between gap-4 rounded-2xl border p-4 transition ${draft.active ? "border-emerald-200 bg-emerald-50" : "border-slate-200 bg-slate-50"}`}><span><span className="block text-sm font-black text-slate-800">Show in public catalog</span><span className="mt-1 block text-xs font-semibold leading-5 text-slate-500">{draft.active ? "Customers can see this product. It is also available for task assignment." : "Hidden from customers, but still available in the task assignment list."}</span></span><input type="checkbox" checked={draft.active} onChange={(event) => updateDraft("active", event.target.checked)} className="h-5 w-5 shrink-0 accent-[#ee4d2d]" /></label><div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end"><Button type="button" variant="ghost" disabled={busy} onClick={() => setEditing(null)}>Cancel</Button><Button type="submit" loading={busy} disabled={!draftIsValid}>{editing.mode === "create" ? <><Plus size={17} /> Add product</> : <><Check size={17} /> Save changes</>}</Button></div></form></Modal>}
 
     {deleting && <Modal title="Delete catalog product?" onClose={() => !busy && setDeleting(null)}><div className="flex gap-4 rounded-3xl border border-rose-200 bg-rose-50 p-4"><span className="grid h-12 w-12 shrink-0 place-items-center rounded-2xl bg-white text-rose-600"><AlertTriangle size={23} /></span><div><p className="font-black text-rose-900">{deleting.name}</p><p className="mt-1 text-sm font-semibold leading-6 text-rose-700">This removes the item from the customer product galleries.</p></div></div><div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end"><Button variant="ghost" disabled={busy} onClick={() => setDeleting(null)}>Cancel</Button><Button variant="danger" loading={busy} onClick={deleteCatalogProduct}><Trash2 size={17} /> Delete permanently</Button></div></Modal>}
   </>;

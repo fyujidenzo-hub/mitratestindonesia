@@ -3,6 +3,11 @@ import { UserLevel, UserRole } from "@prisma/client";
 import bcrypt from "bcryptjs";
 import { calculateCommission } from "../src/lib/commission.js";
 import { createPrismaClient } from "../src/lib/prisma-client.js";
+import {
+  defaultRewardSettings,
+  rewardSettingKeys,
+  serializeRewardMilestones,
+} from "../src/lib/reward-settings.js";
 
 const prisma = createPrismaClient();
 
@@ -128,6 +133,15 @@ for (const banner of catalogBanners) {
 
   for (const [key, value] of Object.entries(settings)) {
     await prisma.siteSetting.upsert({ where: { key }, update: { value }, create: { key, value } });
+  }
+
+  const rewardSettings = {
+    [rewardSettingKeys.milestones]: serializeRewardMilestones(defaultRewardSettings.milestones),
+    [rewardSettingKeys.terms]: defaultRewardSettings.terms,
+  };
+  for (const [key, value] of Object.entries(rewardSettings)) {
+    // Seeding must never overwrite a Super Admin's live reward configuration.
+    await prisma.siteSetting.upsert({ where: { key }, update: {}, create: { key, value } });
   }
 
   console.log(`Seed complete. Super admin: ${superAdmin.username} / Admin123!`);

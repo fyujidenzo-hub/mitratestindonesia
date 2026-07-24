@@ -8,18 +8,15 @@ import { OrderStatus, TransactionStatus, TransactionType, UserRole } from "@pris
 import { authenticateCustomer, type AuthRequest } from "../middleware/auth.js";
 import { prisma } from "../lib/prisma.js";
 import { asyncHandler, HttpError, jsonSafe, requestNumber } from "../lib/http.js";
+import {
+  parseRewardMilestones,
+  rewardSettingKeys,
+  rewardSettingsFromValues,
+} from "../lib/reward-settings.js";
 
 const router = Router();
 const activeStatuses = [OrderStatus.WAITING_ASSIGNMENT, OrderStatus.PRODUCT_ASSIGNED, OrderStatus.WAITING_SHIPMENT, OrderStatus.PENDING_DELIVERY];
 const securityLimiter = rateLimit({ windowMs: 15 * 60_000, limit: 5, standardHeaders: "draft-8", legacyHeaders: false });
-const taskRewardMilestones = new Map<number, bigint>([
-  [5, 25_000n],
-  [7, 50_000n],
-  [10, 75_000n],
-  [12, 150_000n],
-  [15, 200_000n],
-]);
-
 function ordinal(value: number) {
   const remainder = value % 100;
   if (remainder >= 11 && remainder <= 13) return `${value}th`;
@@ -37,6 +34,30 @@ router.use(asyncHandler(async (request: AuthRequest, _response, next) => {
   next();
 }));
 
+router.post(
+  "/session/heartbeat",
+  asyncHandler(async (request: AuthRequest, response) => {
+    await prisma.user.update({
+      where: { id: request.auth!.id },
+      data: { lastSeenAt: new Date() },
+      select: { id: true },
+    });
+    response.status(204).end();
+  }),
+);
+
+router.post(
+  "/session/offline",
+  asyncHandler(async (request: AuthRequest, response) => {
+    await prisma.user.update({
+      where: { id: request.auth!.id },
+      data: { lastSeenAt: null },
+      select: { id: true },
+    });
+    response.status(204).end();
+  }),
+);
+
 const upload = multer({
   storage: multer.diskStorage({
     destination: path.resolve("uploads"),
@@ -52,7 +73,7 @@ const upload = multer({
 router.get(
   "/overview",
   asyncHandler(async (request: AuthRequest, response) => {
-    const [user, transactions, orders] = await Promise.all([
+    const [user, transactions, orders, rewardSettingRows] = await Promise.all([
       prisma.user.findUnique({ where: { id: request.auth!.id }, include: { referrer: { select: { displayName: true } } } }),
       prisma.transaction.findMany({ where: { userId: request.auth!.id }, orderBy: { createdAt: "desc" }, take: 50 }),
       prisma.order.findMany({
@@ -64,10 +85,17 @@ router.get(
         orderBy: { createdAt: "desc" },
         take: 50,
       }),
+      prisma.siteSetting.findMany({
+        where: { key: { in: [rewardSettingKeys.milestones, rewardSettingKeys.terms] } },
+        select: { key: true, value: true },
+      }),
     ]);
     if (!user) throw new HttpError(404, "Account not found.");
     const { passwordHash: _passwordHash, withdrawalPasswordHash: _withdrawalPasswordHash, ...safeUser } = user;
-    response.json(jsonSafe({ user: safeUser, transactions, orders }));
+    const rewardSettings = rewardSettingsFromValues(
+      Object.fromEntries(rewardSettingRows.map((setting) => [setting.key, setting.value])),
+    );
+    response.json(jsonSafe({ user: safeUser, transactions, orders, rewardSettings }));
   }),
 );
 
@@ -238,7 +266,13 @@ router.post(
         where: { id: request.auth!.id },
         select: { totalOrders: true },
       });
-      const rewardAmount = taskRewardMilestones.get(completedUser.totalOrders) ?? 0n;
+      const rewardMilestoneSetting = await database.siteSetting.findUnique({
+        where: { key: rewardSettingKeys.milestones },
+        select: { value: true },
+      });
+      const configuredMilestone = parseRewardMilestones(rewardMilestoneSetting?.value)
+        .find((milestone) => milestone.task === completedUser.totalOrders);
+      const rewardAmount = BigInt(configuredMilestone?.amount ?? 0);
       if (rewardAmount > 0n) {
         await database.user.update({ where: { id: request.auth!.id }, data: { balance: { increment: rewardAmount } } });
         await database.transaction.create({

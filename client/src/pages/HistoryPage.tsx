@@ -1,26 +1,27 @@
-import { CheckCircle2, CreditCard, Gift, Landmark, LockKeyhole } from "lucide-react";
+import { CheckCircle2, CreditCard, FileText, Gift, Landmark, LockKeyhole } from "lucide-react";
 import { useEffect, useState } from "react";
 import { CustomerShell } from "../components/CustomerShell";
 import { Card, StatusPill } from "../components/Ui";
 import { api, dateTime, money } from "../lib/api";
 import { useAuth } from "../lib/auth";
-import { rewardMilestones, rewardTaskGoal } from "../lib/rewards";
+import { normalizeRewardSettings, rewardTaskGoal, type RewardSettings } from "../lib/rewards";
 import { useI18n } from "../lib/i18n";
 import type { Order, Transaction, User } from "../types";
 
 export default function HistoryPage() {
   const { user } = useAuth();
   const { t } = useI18n();
-  const [overview, setOverview] = useState<{ user: User; transactions: Transaction[]; orders: Order[] } | null>(null);
+  const [overview, setOverview] = useState<{ user: User; transactions: Transaction[]; orders: Order[]; rewardSettings: RewardSettings } | null>(null);
 
   useEffect(() => {
-    api<{ user: User; transactions: Transaction[]; orders: Order[] }>("/customer/overview").then(setOverview);
+    api<{ user: User; transactions: Transaction[]; orders: Order[]; rewardSettings: RewardSettings }>("/customer/overview").then(setOverview);
   }, []);
 
   const currentUser = overview?.user ?? user;
   const completedTasks = currentUser?.totalOrders ?? 0;
   const transactions = overview?.transactions ?? [];
   const rewards = transactions.filter((transaction) => transaction.type === "REWARD");
+  const rewardSettings = normalizeRewardSettings(overview?.rewardSettings);
 
   return (
     <CustomerShell>
@@ -40,12 +41,23 @@ export default function HistoryPage() {
         <section className="mt-6">
           <div className="flex items-center gap-3"><div className="grid h-11 w-11 place-items-center rounded-2xl bg-shopee-50 text-shopee-500"><Gift size={21} /></div><div><h2 className="font-black text-slate-900">{t("Task reward milestones")}</h2><p className="text-xs font-semibold text-slate-400">{t("Rewards are credited automatically when each target is reached.")}</p></div></div>
           <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
-            {rewardMilestones.map((milestone) => {
+            {rewardSettings.milestones.map((milestone) => {
               const earned = completedTasks >= milestone.task;
               return <Card key={milestone.task} className={`p-4 ${earned ? "border-orange-200 bg-orange-50/30" : ""}`}><div className={`grid h-10 w-10 place-items-center rounded-2xl ${earned ? "bg-shopee-500 text-white" : "bg-slate-100 text-slate-400"}`}>{earned ? <CheckCircle2 size={19} /> : <LockKeyhole size={18} />}</div><p className="mt-4 text-xs font-black uppercase tracking-wide text-slate-400">Complete task {milestone.task}</p><p className={`mt-1 text-lg font-black ${earned ? "text-shopee-600" : "text-slate-700"}`}>{money(milestone.amount)}</p><p className="mt-2 text-[11px] font-bold text-slate-400">{earned ? "Reward earned" : `${Math.max(0, milestone.task - completedTasks)} tasks remaining`}</p></Card>;
             })}
           </div>
         </section>
+
+        <Card className="mt-6 overflow-hidden border-orange-100">
+          <div className="flex items-start gap-4 p-5 sm:p-6">
+            <span className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-orange-50 text-shopee-500"><FileText size={20} /></span>
+            <div className="min-w-0">
+              <p className="text-[10px] font-black uppercase tracking-[.16em] text-shopee-500">{t("Reward program")}</p>
+              <h2 className="mt-1 text-lg font-black text-slate-900">{t("Terms and conditions")}</h2>
+              <p className="mt-2 whitespace-pre-line text-sm font-semibold leading-6 text-slate-600">{rewardSettings.terms}</p>
+            </div>
+          </div>
+        </Card>
 
         <div className="mt-7 grid gap-6 lg:grid-cols-[.85fr_1.15fr]">
           <Card className="overflow-hidden">
