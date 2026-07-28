@@ -229,8 +229,8 @@ router.get(
     const jakartaDay = jakartaDayBounds();
     const [members, transactions, orders, taskProducts, catalogProducts, catalogBanners, banks, staff, settings, dailyRegistrations, dailyTransactions] = await Promise.all([
       prisma.user.findMany({ where: userFilter, select: { id: true, username: true, displayName: true, phone: true, balance: true, level: true, totalOrders: true, withdrawalLocked: true, withdrawalRemarks: true, isActive: true, createdAt: true, lastLoginAt: true, lastSeenAt: true, referrer: { select: { id: true, displayName: true, invitationCode: true, adminCode: true } } }, orderBy: { createdAt: "desc" } }),
-      prisma.transaction.findMany({ where: transactionFilter, include: { user: { select: { username: true, displayName: true, referrer: { select: { id: true, displayName: true, adminCode: true } } } }, reviewer: { select: { displayName: true, adminCode: true } } }, orderBy: { createdAt: "desc" }, take: 200 }),
-      prisma.order.findMany({ where: orderFilter, include: { user: { select: { username: true, displayName: true, balance: true, totalOrders: true, level: true, referrer: { select: { id: true, displayName: true, adminCode: true } } } }, admin: { select: { id: true, displayName: true, adminCode: true } }, items: true }, orderBy: { createdAt: "desc" }, take: 200 }),
+      prisma.transaction.findMany({ where: transactionFilter, include: { user: { select: { username: true, displayName: true, phone: true, referrer: { select: { id: true, displayName: true, adminCode: true } } } }, reviewer: { select: { displayName: true, adminCode: true } } }, orderBy: { createdAt: "desc" }, take: 200 }),
+      prisma.order.findMany({ where: orderFilter, include: { user: { select: { username: true, displayName: true, phone: true, balance: true, totalOrders: true, level: true, referrer: { select: { id: true, displayName: true, adminCode: true } } } }, admin: { select: { id: true, displayName: true, adminCode: true } }, items: true }, orderBy: { createdAt: "desc" }, take: 200 }),
       prisma.product.findMany({ orderBy: { createdAt: "desc" } }),
       prisma.catalogProduct.findMany({ orderBy: [{ price: "asc" }, { name: "asc" }] }),
       prisma.catalogBanner.findMany({ orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }] }),
@@ -250,6 +250,7 @@ router.get(
         ? prisma.transaction.findMany({
           where: {
             type: { in: [TransactionType.TOPUP, TransactionType.WITHDRAWAL] },
+            status: TransactionStatus.APPROVED,
             createdAt: { gte: jakartaDay.start, lt: jakartaDay.end },
             user: { referrerId: { not: null } },
           },

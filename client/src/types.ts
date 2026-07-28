@@ -87,7 +87,7 @@ export type Transaction = {
   balanceDeductedAt?: string;
   creditedAt?: string;
   createdAt: string;
-  user?: Pick<User, "username" | "displayName"> & {
+  user?: Pick<User, "username" | "displayName" | "phone"> & {
     referrer?: Pick<User, "id" | "displayName" | "adminCode">;
   };
   reviewer?: Pick<User, "displayName" | "adminCode">;
@@ -120,7 +120,7 @@ export type Order = {
   commissionCreditedAt?: string;
   createdAt: string;
   items: OrderItem[];
-  user?: Pick<User, "username" | "displayName" | "balance" | "totalOrders" | "level"> & {
+  user?: Pick<User, "username" | "displayName" | "phone" | "balance" | "totalOrders" | "level"> & {
     referrer?: Pick<User, "id" | "displayName" | "adminCode">;
   };
   admin?: Pick<User, "id" | "displayName" | "adminCode">;
