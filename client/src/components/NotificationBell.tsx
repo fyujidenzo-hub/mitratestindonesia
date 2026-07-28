@@ -47,13 +47,19 @@ export function NotificationBell() {
     } catch {
       setReadIds(new Set());
     }
-    load();
-    const interval = window.setInterval(() => load(), 20_000);
-    const refreshOnFocus = () => load();
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === "visible") void load();
+    };
+    refreshWhenVisible();
+    const interval = window.setInterval(refreshWhenVisible, 20_000);
+    const refreshOnFocus = () => refreshWhenVisible();
+    const refreshOnVisibility = () => refreshWhenVisible();
     window.addEventListener("focus", refreshOnFocus);
+    document.addEventListener("visibilitychange", refreshOnVisibility);
     return () => {
       window.clearInterval(interval);
       window.removeEventListener("focus", refreshOnFocus);
+      document.removeEventListener("visibilitychange", refreshOnVisibility);
     };
   }, [user?.id]);
 

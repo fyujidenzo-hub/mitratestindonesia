@@ -7,17 +7,17 @@ const router = Router();
 router.get(
   "/bootstrap",
   asyncHandler(async (_request, response) => {
-    const [catalogProducts, catalogBanners, banks, settings] = await Promise.all([
+    const [catalogProducts, catalogBanners, selectedBank, settings] = await Promise.all([
       prisma.catalogProduct.findMany({ where: { active: true }, orderBy: [{ price: "asc" }, { name: "asc" }] }),
       prisma.catalogBanner.findMany({ where: { active: true }, orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }] }),
-      prisma.bank.findMany({ where: { active: true }, orderBy: { bankName: "asc" } }),
+      prisma.bank.findFirst({ where: { active: true }, orderBy: { updatedAt: "desc" } }),
       prisma.siteSetting.findMany(),
     ]);
     response.json(
       jsonSafe({
         catalogProducts,
         catalogBanners,
-        banks,
+        banks: selectedBank ? [selectedBank] : [],
         settings: Object.fromEntries(settings.map((setting) => [setting.key, setting.value])),
       }),
     );

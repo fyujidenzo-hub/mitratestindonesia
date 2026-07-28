@@ -20,7 +20,7 @@ export default function App() {
 
 function AdminEntry() {
   const { user, loading } = useAuth();
-  if (loading) return <div className="grid min-h-screen place-items-center bg-canvas"><div className="h-11 w-11 animate-spin rounded-full border-4 border-shopee-100 border-t-shopee-500" /></div>;
+  if (loading) return <div className="grid min-h-screen place-items-center bg-transparent"><div className="h-11 w-11 animate-spin rounded-full border-4 border-shopee-100 border-t-shopee-500" /></div>;
   if (!user) return <LoginPage area="admin" />;
   if (user.role === "CUSTOMER") return <Navigate to="/" replace />;
   return <AdminPage />;

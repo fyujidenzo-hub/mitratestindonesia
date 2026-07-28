@@ -117,6 +117,12 @@ const supportSettingsInputSchema = z.object({
   }, "Use a valid Telegram t.me link."),
 });
 
+const bankInputSchema = z.object({
+  bankName: z.string().trim().min(2).max(80),
+  accountNumber: z.string().trim().min(4).max(64).regex(/^[a-zA-Z0-9 .-]+$/, "Use letters, numbers, spaces, dots, or dashes only."),
+  accountName: z.string().trim().min(2).max(120),
+});
+
 const rewardSettingsInputSchema = z.object({
   milestones: z.array(z.object({
     task: z.number().int().refine(
@@ -186,6 +192,20 @@ async function ensureStaffIdentifiersAvailable(input: { username: string; phone?
   throw new HttpError(409, "That invitation code is already in use.");
 }
 
+function jakartaDayBounds(now = new Date()) {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Jakarta",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(now);
+  const part = (type: Intl.DateTimeFormatPartTypes) => parts.find((item) => item.type === type)?.value ?? "";
+  const date = `${part("year")}-${part("month")}-${part("day")}`;
+  const start = new Date(`${date}T00:00:00+07:00`);
+  const end = new Date(start.getTime() + 24 * 60 * 60 * 1000);
+  return { date, start, end };
+}
+
 router.use(authenticateAdmin, requireRole(...staffRoles));
 router.use(asyncHandler(async (request: AuthRequest, _response, next) => {
   const activeStaff = await prisma.user.findFirst({
@@ -206,20 +226,71 @@ router.get(
     const transactionFilter = scopedUserIds ? { userId: { in: scopedUserIds } } : {};
     const orderFilter = scopedUserIds ? { userId: { in: scopedUserIds } } : {};
 
-    const [members, transactions, orders, taskProducts, catalogProducts, catalogBanners, banks, staff, settings] = await Promise.all([
-      prisma.user.findMany({ where: userFilter, select: { id: true, username: true, displayName: true, phone: true, balance: true, level: true, totalOrders: true, withdrawalLocked: true, withdrawalRemarks: true, isActive: true, createdAt: true, lastLoginAt: true, lastSeenAt: true, referrer: { select: { displayName: true, invitationCode: true } } }, orderBy: { createdAt: "desc" } }),
-      prisma.transaction.findMany({ where: transactionFilter, include: { user: { select: { username: true, displayName: true } }, reviewer: { select: { displayName: true } } }, orderBy: { createdAt: "desc" }, take: 200 }),
-      prisma.order.findMany({ where: orderFilter, include: { user: { select: { username: true, displayName: true, balance: true, totalOrders: true, level: true } }, items: true }, orderBy: { createdAt: "desc" }, take: 200 }),
+    const jakartaDay = jakartaDayBounds();
+    const [members, transactions, orders, taskProducts, catalogProducts, catalogBanners, banks, staff, settings, dailyRegistrations, dailyTransactions] = await Promise.all([
+      prisma.user.findMany({ where: userFilter, select: { id: true, username: true, displayName: true, phone: true, balance: true, level: true, totalOrders: true, withdrawalLocked: true, withdrawalRemarks: true, isActive: true, createdAt: true, lastLoginAt: true, lastSeenAt: true, referrer: { select: { id: true, displayName: true, invitationCode: true, adminCode: true } } }, orderBy: { createdAt: "desc" } }),
+      prisma.transaction.findMany({ where: transactionFilter, include: { user: { select: { username: true, displayName: true, referrer: { select: { id: true, displayName: true, adminCode: true } } } }, reviewer: { select: { displayName: true, adminCode: true } } }, orderBy: { createdAt: "desc" }, take: 200 }),
+      prisma.order.findMany({ where: orderFilter, include: { user: { select: { username: true, displayName: true, balance: true, totalOrders: true, level: true, referrer: { select: { id: true, displayName: true, adminCode: true } } } }, admin: { select: { id: true, displayName: true, adminCode: true } }, items: true }, orderBy: { createdAt: "desc" }, take: 200 }),
       prisma.product.findMany({ orderBy: { createdAt: "desc" } }),
       prisma.catalogProduct.findMany({ orderBy: [{ price: "asc" }, { name: "asc" }] }),
       prisma.catalogBanner.findMany({ orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }] }),
-      prisma.bank.findMany({ orderBy: { createdAt: "desc" } }),
+      prisma.bank.findMany({ orderBy: { updatedAt: "desc" } }),
       request.auth!.role === UserRole.SUPER_ADMIN
         ? prisma.user.findMany({ where: { role: { in: staffRoles } }, select: staffSelect, orderBy: [{ isActive: "desc" }, { createdAt: "asc" }] })
         : Promise.resolve([]),
       prisma.siteSetting.findMany(),
+      request.auth!.role === UserRole.SUPER_ADMIN
+        ? prisma.user.groupBy({
+          by: ["referrerId"],
+          where: { role: UserRole.CUSTOMER, referrerId: { not: null }, createdAt: { gte: jakartaDay.start, lt: jakartaDay.end } },
+          _count: { _all: true },
+        })
+        : Promise.resolve([]),
+      request.auth!.role === UserRole.SUPER_ADMIN
+        ? prisma.transaction.findMany({
+          where: {
+            type: { in: [TransactionType.TOPUP, TransactionType.WITHDRAWAL] },
+            createdAt: { gte: jakartaDay.start, lt: jakartaDay.end },
+            user: { referrerId: { not: null } },
+          },
+          select: { type: true, amount: true, user: { select: { referrerId: true } } },
+        })
+        : Promise.resolve([]),
     ]);
-    response.json(jsonSafe({ members, transactions, orders, taskProducts, catalogProducts, catalogBanners, banks, staff, settings: Object.fromEntries(settings.map((setting) => [setting.key, setting.value])) }));
+    const registrationCounts = new Map(dailyRegistrations.map((row) => [row.referrerId, row._count._all]));
+    const dailyAdminStats = staff.map((staffMember) => {
+      const adminTransactions = dailyTransactions.filter((transaction) => transaction.user.referrerId === staffMember.id);
+      const topups = adminTransactions.filter((transaction) => transaction.type === TransactionType.TOPUP);
+      const withdrawals = adminTransactions.filter((transaction) => transaction.type === TransactionType.WITHDRAWAL);
+      return {
+        adminId: staffMember.id,
+        displayName: staffMember.displayName,
+        adminCode: staffMember.adminCode,
+        registrations: registrationCounts.get(staffMember.id) ?? 0,
+        topupCount: topups.length,
+        topupAmount: topups.reduce((sum, transaction) => sum + transaction.amount, 0n),
+        withdrawalCount: withdrawals.length,
+        withdrawalAmount: withdrawals.reduce((sum, transaction) => sum + transaction.amount, 0n),
+      };
+    });
+    const selectedBankIndex = banks.findIndex((bank) => bank.active);
+    const displayBanks = banks.map((bank, index) => ({
+      ...bank,
+      active: bank.active && index === selectedBankIndex,
+    }));
+    response.json(jsonSafe({
+      members,
+      transactions,
+      orders,
+      taskProducts,
+      catalogProducts,
+      catalogBanners,
+      banks: displayBanks,
+      staff,
+      dailyAdminStats,
+      dailyStatsDate: jakartaDay.date,
+      settings: Object.fromEntries(settings.map((setting) => [setting.key, setting.value])),
+    }));
   }),
 );
 
@@ -252,7 +323,7 @@ router.get(
         createdAt: true,
         lastLoginAt: true,
         lastSeenAt: true,
-        referrer: { select: { displayName: true, invitationCode: true } },
+        referrer: { select: { id: true, displayName: true, invitationCode: true, adminCode: true } },
       },
       orderBy: { phone: "asc" },
       take: 25,
@@ -346,6 +417,186 @@ router.patch(
     });
 
     response.json(jsonSafe({ settings }));
+  }),
+);
+
+router.post(
+  "/banks",
+  requireRole(UserRole.SUPER_ADMIN),
+  asyncHandler(async (request: AuthRequest, response) => {
+    const input = bankInputSchema.parse(request.body);
+    const duplicate = await prisma.bank.findFirst({
+      where: {
+        bankName: { equals: input.bankName, mode: "insensitive" },
+        accountNumber: input.accountNumber,
+      },
+      select: { id: true },
+    });
+    if (duplicate) throw new HttpError(409, "That bank account is already registered.");
+
+    const bank = await prisma.$transaction(async (database) => {
+      const selectedBank = await database.bank.findFirst({
+        where: { active: true },
+        select: { id: true },
+      });
+      const created = await database.bank.create({
+        data: {
+          bankName: input.bankName,
+          accountNumber: input.accountNumber,
+          accountName: input.accountName,
+          active: !selectedBank,
+        },
+      });
+      await database.auditLog.create({
+        data: {
+          actorId: request.auth!.id,
+          action: "BANK_ACCOUNT_CREATED",
+          entityType: "Bank",
+          entityId: created.id,
+          details: {
+            bankName: created.bankName,
+            accountNumber: created.accountNumber,
+            accountName: created.accountName,
+          },
+        },
+      });
+      return created;
+    });
+
+    response.status(201).json(jsonSafe({ bank }));
+  }),
+);
+
+router.patch(
+  "/banks/:id",
+  requireRole(UserRole.SUPER_ADMIN),
+  asyncHandler(async (request: AuthRequest, response) => {
+    const bankId = String(request.params.id);
+    const input = bankInputSchema.parse(request.body);
+    const existing = await prisma.bank.findUnique({ where: { id: bankId } });
+    if (!existing) throw new HttpError(404, "Bank account not found.");
+
+    const duplicate = await prisma.bank.findFirst({
+      where: {
+        id: { not: bankId },
+        bankName: { equals: input.bankName, mode: "insensitive" },
+        accountNumber: input.accountNumber,
+      },
+      select: { id: true },
+    });
+    if (duplicate) throw new HttpError(409, "That bank account is already registered.");
+
+    const bank = await prisma.$transaction(async (database) => {
+      const updated = await database.bank.update({
+        where: { id: bankId },
+        data: {
+          bankName: input.bankName,
+          accountNumber: input.accountNumber,
+          accountName: input.accountName,
+        },
+      });
+      await database.auditLog.create({
+        data: {
+          actorId: request.auth!.id,
+          action: "BANK_ACCOUNT_UPDATED",
+          entityType: "Bank",
+          entityId: bankId,
+          details: {
+            previous: {
+              bankName: existing.bankName,
+              accountNumber: existing.accountNumber,
+              accountName: existing.accountName,
+            },
+            updated: {
+              bankName: updated.bankName,
+              accountNumber: updated.accountNumber,
+              accountName: updated.accountName,
+            },
+          },
+        },
+      });
+      return updated;
+    });
+
+    response.json(jsonSafe({ bank }));
+  }),
+);
+
+router.patch(
+  "/banks/:id/activate",
+  requireRole(UserRole.SUPER_ADMIN),
+  asyncHandler(async (request: AuthRequest, response) => {
+    const bankId = String(request.params.id);
+    const existing = await prisma.bank.findUnique({ where: { id: bankId } });
+    if (!existing) throw new HttpError(404, "Bank account not found.");
+
+    const bank = await prisma.$transaction(async (database) => {
+      await database.bank.updateMany({
+        where: { active: true },
+        data: { active: false },
+      });
+      const selected = await database.bank.update({
+        where: { id: bankId },
+        data: { active: true },
+      });
+      await database.auditLog.create({
+        data: {
+          actorId: request.auth!.id,
+          action: "BANK_ACCOUNT_ACTIVATED",
+          entityType: "Bank",
+          entityId: bankId,
+          details: {
+            bankName: selected.bankName,
+            accountNumber: selected.accountNumber,
+            accountName: selected.accountName,
+          },
+        },
+      });
+      return selected;
+    });
+
+    response.json(jsonSafe({ bank }));
+  }),
+);
+
+router.delete(
+  "/banks/:id",
+  requireRole(UserRole.SUPER_ADMIN),
+  asyncHandler(async (request: AuthRequest, response) => {
+    const bankId = String(request.params.id);
+    const existing = await prisma.bank.findUnique({ where: { id: bankId } });
+    if (!existing) throw new HttpError(404, "Bank account not found.");
+
+    await prisma.$transaction(async (database) => {
+      await database.bank.delete({ where: { id: bankId } });
+      if (existing.active) {
+        const fallback = await database.bank.findFirst({
+          orderBy: { createdAt: "asc" },
+          select: { id: true },
+        });
+        if (fallback) {
+          await database.bank.update({
+            where: { id: fallback.id },
+            data: { active: true },
+          });
+        }
+      }
+      await database.auditLog.create({
+        data: {
+          actorId: request.auth!.id,
+          action: "BANK_ACCOUNT_DELETED",
+          entityType: "Bank",
+          entityId: bankId,
+          details: {
+            bankName: existing.bankName,
+            accountNumber: existing.accountNumber,
+            accountName: existing.accountName,
+          },
+        },
+      });
+    });
+
+    response.status(204).send();
   }),
 );
 

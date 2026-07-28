@@ -34,10 +34,10 @@ export function CustomerShell({ children, search, onSearch }: { children: React.
   };
 
   return (
-    <div className="min-h-screen w-full overflow-x-clip bg-[#fff8f3] pb-28 text-ink lg:pb-0">
-      <header className="sticky top-0 z-50 border-b border-orange-100 bg-white/95 shadow-sm backdrop-blur-xl">
+    <div className="min-h-screen w-full overflow-x-clip bg-transparent pb-28 text-ink lg:pb-0">
+      <header className="sticky top-0 z-50 border-b border-orange-100 bg-white/[.98] shadow-[0_8px_28px_rgba(124,45,18,.07)]">
         <div className="mx-auto flex h-[72px] w-full min-w-0 max-w-[1500px] items-center gap-2 px-3 sm:gap-3 sm:px-6 lg:px-8">
-          <Brand compact />
+          <Brand compact mobileIconOnly />
           {onSearch && <div className="relative ml-auto hidden w-full max-w-xl md:block"><Search size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" /><input value={search ?? ""} onChange={(event) => onSearch(event.target.value)} placeholder={t("Search products and categories")} className="h-11 w-full rounded-2xl border border-slate-200 bg-slate-50 pl-11 pr-4 text-sm font-semibold text-slate-800 outline-none transition focus:border-shopee-300 focus:bg-white focus:ring-4 focus:ring-shopee-50" /></div>}
           <div className={`${onSearch ? "" : "ml-auto"} flex items-center gap-2`}>
             <LanguageSwitcher compact />
@@ -51,7 +51,7 @@ export function CustomerShell({ children, search, onSearch }: { children: React.
       </header>
 
       <div className="mx-auto w-full min-w-0 max-w-[1500px] lg:grid lg:grid-cols-[240px_minmax(0,1fr)]">
-        <aside className="sticky top-[72px] hidden h-[calc(100vh-72px)] flex-col border-r border-orange-100 bg-white p-4 lg:flex">
+        <aside className="sticky top-[72px] hidden h-[calc(100vh-72px)] flex-col border-r border-orange-100 bg-white/[.98] p-4 shadow-[12px_0_36px_rgba(124,45,18,.05)] lg:flex">
           <nav className="grid gap-1.5">
             {desktopNav.map(({ to, label, icon: Icon }) => <NavLink key={to} to={to} end={to === "/"} className={({ isActive }) => `flex items-center gap-3 rounded-2xl px-4 py-3.5 text-sm font-black transition ${isActive ? "bg-gradient-to-r from-shopee-50 to-orange-50 text-shopee-600 shadow-sm ring-1 ring-shopee-100" : "text-slate-500 hover:bg-slate-50 hover:text-slate-900"}`}><Icon size={19} /><span>{t(label)}</span></NavLink>)}
           </nav>
@@ -67,7 +67,7 @@ export function CustomerShell({ children, search, onSearch }: { children: React.
         <div className="w-full min-w-0">{children}</div>
       </div>
 
-      <nav className="fixed inset-x-3 bottom-3 z-50 rounded-[28px] border border-orange-100 bg-white/95 px-2 pb-[max(.55rem,env(safe-area-inset-bottom))] pt-2 shadow-[0_16px_55px_rgba(124,41,29,.22)] backdrop-blur-xl lg:hidden">
+      <nav className="fixed inset-x-3 bottom-3 z-50 rounded-[28px] border border-orange-100 bg-white/[.98] px-2 pb-[max(.55rem,env(safe-area-inset-bottom))] pt-2 shadow-[0_16px_55px_rgba(124,41,29,.18)] lg:hidden">
         <div className="mx-auto grid max-w-xl grid-cols-5 items-end">
           {mobileNav.slice(0, 2).map(({ to, label, icon: Icon }) => <MobileLink key={to} to={to} label={t(label)} icon={Icon} active={to === "/" ? location.pathname === "/" : location.pathname.startsWith(to)} />)}
           <Link to="/task-center" aria-label="Open task center" aria-current={location.pathname.startsWith("/task-center") ? "page" : undefined} className={`mx-auto -mt-7 grid h-16 w-16 place-items-center rounded-full border-[6px] border-white bg-gradient-to-br from-shopee-500 to-orange-400 text-white shadow-float transition active:scale-95 ${location.pathname.startsWith("/task-center") ? "ring-4 ring-orange-200" : ""}`}><Zap size={29} fill="currentColor" /></Link>

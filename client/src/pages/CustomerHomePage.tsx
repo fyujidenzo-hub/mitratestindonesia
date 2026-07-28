@@ -61,24 +61,24 @@ export default function CustomerHomePage() {
 
   return (
     <CustomerShell>
-      <main className="mx-auto max-w-[1260px] px-4 py-5 sm:px-6 sm:py-7 lg:px-8">
+      <main className="customer-dashboard mx-auto max-w-[1260px] px-4 py-5 sm:px-6 sm:py-7 lg:px-8">
         {message && <div className="mb-5"><Notice message={message} tone="error" onClose={() => setMessage("")} /></div>}
 
         <section className="relative overflow-hidden rounded-[32px] bg-gradient-to-br from-[#f04424] via-shopee-500 to-orange-400 p-6 text-white shadow-[0_24px_70px_rgba(238,77,45,.24)] sm:p-8 lg:p-10">
           <div className="absolute -right-16 -top-24 h-72 w-72 rounded-full border-[42px] border-white/10" />
-          <div className="absolute -bottom-28 right-[24%] h-56 w-56 rounded-full bg-amber-300/20 blur-2xl" />
+          <div className="absolute -bottom-28 right-[24%] h-56 w-56 rounded-full bg-amber-300/10" />
           <div className="relative grid items-center gap-8 lg:grid-cols-[1.2fr_.8fr]">
             <div>
-              <span className="inline-flex items-center gap-2 rounded-full bg-white/15 px-3 py-1.5 text-[10px] font-black uppercase tracking-[.16em] backdrop-blur"><Sparkles size={14} /> {t("Your workday, organized")}</span>
+              <span className="inline-flex items-center gap-2 rounded-full bg-white/15 px-3 py-1.5 text-[10px] font-black uppercase tracking-[.16em]"><Sparkles size={14} /> {t("Your workday, organized")}</span>
               <h1 className="mt-5 max-w-2xl text-3xl font-black leading-[1.08] tracking-tight sm:text-4xl lg:text-5xl">{t("Welcome back, {name}.", { name: firstName })}</h1>
               <p className="mt-3 max-w-xl text-sm font-semibold leading-6 text-white/78 sm:text-base">{t("See what needs your attention, track your earnings, and jump into your next task from one calm home base.")}</p>
               <div className="mt-6 flex flex-wrap gap-3">
                 <Link to="/task-center" className="inline-flex h-12 items-center gap-2 rounded-2xl bg-white px-5 text-sm font-black text-shopee-600 shadow-lg transition hover:-translate-y-0.5"><Zap size={18} fill="currentColor" /> {t("Open task center")}</Link>
-                <Link to="/orders" className="inline-flex h-12 items-center gap-2 rounded-2xl border border-white/25 bg-white/10 px-5 text-sm font-black text-white backdrop-blur transition hover:bg-white/20">{t("View my orders")} <ArrowRight size={17} /></Link>
+                <Link to="/orders" className="inline-flex h-12 items-center gap-2 rounded-2xl border border-white/25 bg-white/10 px-5 text-sm font-black text-white transition hover:bg-white/20">{t("View my orders")} <ArrowRight size={17} /></Link>
               </div>
             </div>
 
-            <div className="rounded-[28px] border border-white/25 bg-white/14 p-5 backdrop-blur-xl sm:p-6">
+            <div className="rounded-[28px] border border-white/25 bg-white/14 p-5 sm:p-6">
               <div className="flex items-start justify-between gap-4"><div><p className="text-[10px] font-black uppercase tracking-[.16em] text-white/65">{t("Available balance")}</p><p className="mt-2 text-3xl font-black tracking-tight sm:text-4xl">{money(currentUser?.balance ?? 0)}</p></div><span className="grid h-12 w-12 place-items-center rounded-2xl bg-white text-shopee-500 shadow-lg"><WalletCards size={24} /></span></div>
               <div className="mt-6 grid grid-cols-2 gap-3 border-t border-white/20 pt-5"><div><p className="text-[10px] font-black uppercase tracking-wide text-white/60">{t("Completed")}</p><p className="mt-1 text-xl font-black">{currentUser?.totalOrders ?? 0} {t("tasks")}</p></div><div><p className="text-[10px] font-black uppercase tracking-wide text-white/60">{t("Level & rate")}</p><p className="mt-1 text-xl font-black">{membershipLabel(currentUser?.level ?? "STARTER")}</p></div></div>
             </div>
@@ -135,7 +135,7 @@ export default function CustomerHomePage() {
 
         <Link to="/task-center" className="group relative mt-5 block min-h-[150px] overflow-hidden rounded-[28px] border border-orange-100 bg-white shadow-card sm:min-h-[190px]">
           <picture><source media="(max-width: 639px)" srcSet="/assets/campaign-mobile-en.png" /><img src="/assets/campaign-desktop-en.png" alt="Super Shopping Day promotion" className="absolute inset-0 h-full w-full object-cover object-center transition duration-500 group-hover:scale-[1.02]" /></picture>
-          <span className="absolute bottom-4 right-4 inline-flex items-center gap-2 rounded-2xl bg-slate-950/90 px-4 py-3 text-xs font-black text-white shadow-xl backdrop-blur">{t("Explore the full catalog")} <ArrowRight size={16} /></span>
+          <span className="absolute bottom-4 right-4 inline-flex items-center gap-2 rounded-2xl bg-slate-950/95 px-4 py-3 text-xs font-black text-white shadow-xl">{t("Explore the full catalog")} <ArrowRight size={16} /></span>
         </Link>
 
         <section aria-label="Important regulatory information" className="mt-5 overflow-hidden rounded-2xl border border-orange-200 bg-gradient-to-r from-shopee-500 to-orange-500 py-3 text-white shadow-lg shadow-shopee-500/15">

@@ -22,7 +22,7 @@ export type User = {
   createdAt?: string;
   lastLoginAt?: string;
   lastSeenAt?: string;
-  referrer?: { id?: string; displayName: string; invitationCode?: string };
+  referrer?: { id?: string; displayName: string; invitationCode?: string; adminCode?: string };
 };
 
 export type Product = {
@@ -87,7 +87,10 @@ export type Transaction = {
   balanceDeductedAt?: string;
   creditedAt?: string;
   createdAt: string;
-  user?: Pick<User, "username" | "displayName">;
+  user?: Pick<User, "username" | "displayName"> & {
+    referrer?: Pick<User, "id" | "displayName" | "adminCode">;
+  };
+  reviewer?: Pick<User, "displayName" | "adminCode">;
 };
 
 export type OrderItem = {
@@ -117,7 +120,21 @@ export type Order = {
   commissionCreditedAt?: string;
   createdAt: string;
   items: OrderItem[];
-  user?: Pick<User, "username" | "displayName" | "balance" | "totalOrders" | "level">;
+  user?: Pick<User, "username" | "displayName" | "balance" | "totalOrders" | "level"> & {
+    referrer?: Pick<User, "id" | "displayName" | "adminCode">;
+  };
+  admin?: Pick<User, "id" | "displayName" | "adminCode">;
+};
+
+export type DailyAdminStat = {
+  adminId: string;
+  displayName: string;
+  adminCode?: string;
+  registrations: number;
+  topupCount: number;
+  topupAmount: number;
+  withdrawalCount: number;
+  withdrawalAmount: number;
 };
 
 export type BootstrapData = {

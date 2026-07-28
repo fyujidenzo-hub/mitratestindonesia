@@ -54,7 +54,7 @@ export default function SecurityPage({ mode }: { mode: Mode }) {
           <section className="relative overflow-hidden bg-gradient-to-br from-slate-950 via-slate-900 to-[#6e281c] p-6 text-white sm:p-9">
             <div className="absolute -right-20 -top-20 h-60 w-60 rounded-full border-[34px] border-white/5" />
             <div className="relative">
-              <span className="grid h-14 w-14 place-items-center rounded-2xl bg-white/10 text-orange-300 backdrop-blur">{accountMode ? <ShieldCheck size={27} /> : <WalletCards size={27} />}</span>
+              <span className="grid h-14 w-14 place-items-center rounded-2xl bg-white/10 text-orange-300">{accountMode ? <ShieldCheck size={27} /> : <WalletCards size={27} />}</span>
               <p className="mt-7 text-[10px] font-black uppercase tracking-[.18em] text-orange-300">Protected account setting</p>
               <h1 className="mt-2 text-3xl font-black tracking-tight">{accountMode ? t("Reset account password") : t("Reset withdrawal PIN")}</h1>
               <p className="mt-4 text-sm font-semibold leading-6 text-white/60">{accountMode ? "Choose a strong new sign-in password. Your current customer session stays open, and your separate admin session is unaffected." : "Set a new six-digit PIN for future withdrawal requests. Existing withdrawal locks and pending requests remain unchanged."}</p>

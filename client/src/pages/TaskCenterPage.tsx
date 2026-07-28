@@ -65,7 +65,7 @@ export default function TaskCenterPage() {
             <p className="relative mt-5 text-2xl font-black sm:text-3xl">{membershipLabel(currentUser?.level ?? "STARTER")}</p>
             <div className="relative mt-4 h-2 overflow-hidden rounded-full bg-white/30"><span className="block h-full rounded-full bg-amber-300" style={{ width: `${Math.max(progress, 8)}%` }} /></div>
             <p className="relative mt-3 text-xs font-bold text-white/75">{completed} {t("tasks completed")}</p>
-            <div className="relative mt-4 rounded-2xl bg-white/15 p-3 text-[11px] font-black backdrop-blur"><Star size={15} className="mr-1 inline text-amber-300" fill="currentColor" /> {t("Complete your next task to level up.")}</div>
+            <div className="relative mt-4 rounded-2xl bg-white/15 p-3 text-[11px] font-black"><Star size={15} className="mr-1 inline text-amber-300" fill="currentColor" /> {t("Complete your next task to level up.")}</div>
           </Card>
 
           <Card className="col-span-2 order-3 border-0 p-5 shadow-card sm:p-6 xl:order-none xl:col-span-1">
