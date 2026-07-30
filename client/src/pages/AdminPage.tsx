@@ -1,5 +1,5 @@
 import { AlertTriangle, BadgeDollarSign, Banknote, Boxes, Check, ChevronDown, ChevronLeft, ChevronRight, ClipboardList, ExternalLink, Eye, Gift, LayoutDashboard, LockKeyhole, LogOut, Menu, PackageCheck, PackagePlus, Pencil, Plus, Power, RefreshCw, Search, Send, Settings2, ShieldCheck, ShoppingBag, Trash2, UserCog, UserPlus, Users, WalletCards, X } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { startTransition, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Brand } from "../components/Brand";
 import { Button, Card, Field, inputClass, Notice, StatusPill } from "../components/Ui";
@@ -11,6 +11,21 @@ import { rewardSettingsFromSiteValues, type RewardSettings } from "../lib/reward
 import type { Bank, CatalogBanner, CatalogProduct, DailyAdminStat, Order, Product, Transaction, User, UserLevel } from "../types";
 
 type AdminData = { members: User[]; transactions: Transaction[]; orders: Order[]; taskProducts: Product[]; catalogProducts: CatalogProduct[]; catalogBanners: CatalogBanner[]; banks: Bank[]; staff: User[]; dailyAdminStats: DailyAdminStat[]; dailyStatsDate: string; settings: Record<string, string> };
+type LiveOverviewData = {
+  metrics: {
+    members: number;
+    totalBalance: number;
+    financeRequests: number;
+    pendingTopups: number;
+    pendingWithdrawals: number;
+    tasksAwaitingAssignment: number;
+  };
+  dailyAdminStats: DailyAdminStat[];
+  dailyStatsDate: string;
+  latestTransactions: Transaction[];
+  latestOrders: Order[];
+  refreshedAt: string;
+};
 type Tab = "overview" | "members" | "tasks" | "topups" | "withdrawals" | "catalog" | "rewards" | "settings" | "staff";
 const tabs: Array<{ key: Tab; label: string; icon: typeof LayoutDashboard; superOnly?: boolean }> = [
   { key: "overview", label: "Overview", icon: LayoutDashboard }, { key: "members", label: "Members", icon: Users }, { key: "tasks", label: "Tasks & Orders", icon: ClipboardList }, { key: "topups", label: "Top-up", icon: BadgeDollarSign }, { key: "withdrawals", label: "Withdrawal", icon: Banknote }, { key: "catalog", label: "Catalog", icon: Boxes, superOnly: true }, { key: "rewards", label: "Rewards", icon: Gift, superOnly: true }, { key: "settings", label: "Settings", icon: Settings2, superOnly: true }, { key: "staff", label: "Admin Team", icon: UserCog, superOnly: true },
@@ -27,13 +42,78 @@ export default function AdminPage() {
   const { t, language } = useI18n();
   const adminRootRef = useRef<HTMLDivElement>(null);
   const adminScopeInitializedRef = useRef(false);
+  const activeRequestsRef = useRef(0);
+  const latestRequestRef = useRef(0);
+  const dataFingerprintRef = useRef("");
+  const liveRequestActiveRef = useRef(false);
+  const latestLiveRequestRef = useRef(0);
+  const liveFingerprintRef = useRef("");
   useAdminTextTranslation(adminRootRef, language);
-  const [data, setData] = useState<AdminData | null>(null); const [tab, setTab] = useState<Tab>("overview"); const [query, setQuery] = useState(""); const [phoneQuery, setPhoneQuery] = useState(""); const [selectedAdminId, setSelectedAdminId] = useState(""); const [menuOpen, setMenuOpen] = useState(false); const [message, setMessage] = useState(""); const [tone, setTone] = useState<"success" | "error">("success"); const [refreshing, setRefreshing] = useState(false);
-  const load = async () => { setRefreshing(true); try { setData(await api<AdminData>("/admin/overview")); } finally { setRefreshing(false); } };
-  useEffect(() => { load(); }, []);
+  const [data, setData] = useState<AdminData | null>(null); const [liveOverview, setLiveOverview] = useState<LiveOverviewData | null>(null); const [tab, setTab] = useState<Tab>("overview"); const [query, setQuery] = useState(""); const [phoneQuery, setPhoneQuery] = useState(""); const [selectedAdminId, setSelectedAdminId] = useState(""); const [menuOpen, setMenuOpen] = useState(false); const [message, setMessage] = useState(""); const [tone, setTone] = useState<"success" | "error">("success"); const [refreshing, setRefreshing] = useState(false);
+  const load = useCallback(async (mode: "initial" | "manual" | "mutation" = "manual") => {
+    const requestId = ++latestRequestRef.current;
+    activeRequestsRef.current += 1;
+    if (mode === "initial" || mode === "manual") setRefreshing(true);
+    try {
+      const nextData = await api<AdminData>("/admin/overview");
+      if (requestId !== latestRequestRef.current) return;
+      const nextFingerprint = JSON.stringify(nextData);
+      if (nextFingerprint !== dataFingerprintRef.current) {
+        dataFingerprintRef.current = nextFingerprint;
+        setData(nextData);
+      }
+    } catch (error) {
+      setTone("error");
+      setMessage(error instanceof Error ? error.message : "Unable to refresh administrator data.");
+    } finally {
+      activeRequestsRef.current = Math.max(0, activeRequestsRef.current - 1);
+      if (mode === "initial" || mode === "manual") setRefreshing(false);
+    }
+  }, []);
+  const loadLiveOverview = useCallback(async () => {
+    if (liveRequestActiveRef.current) return;
+    liveRequestActiveRef.current = true;
+    const requestId = ++latestLiveRequestRef.current;
+    try {
+      const nextOverview = await api<LiveOverviewData>("/admin/overview/live");
+      if (requestId !== latestLiveRequestRef.current) return;
+      const nextFingerprint = JSON.stringify([
+        nextOverview.metrics,
+        nextOverview.dailyAdminStats,
+        nextOverview.dailyStatsDate,
+        nextOverview.latestTransactions,
+        nextOverview.latestOrders,
+      ]);
+      if (nextFingerprint !== liveFingerprintRef.current) {
+        liveFingerprintRef.current = nextFingerprint;
+        startTransition(() => setLiveOverview(nextOverview));
+      }
+    } catch {
+      // Keep the last successful snapshot visible; the manual refresh still
+      // surfaces connection errors without making the dashboard flicker.
+    } finally {
+      liveRequestActiveRef.current = false;
+    }
+  }, []);
+  useEffect(() => { void load("initial"); }, [load]);
+  useEffect(() => {
+    if (tab !== "overview") return;
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === "visible") void loadLiveOverview();
+    };
+    refreshWhenVisible();
+    const interval = window.setInterval(refreshWhenVisible, 4_000);
+    document.addEventListener("visibilitychange", refreshWhenVisible);
+    window.addEventListener("focus", refreshWhenVisible);
+    return () => {
+      window.clearInterval(interval);
+      document.removeEventListener("visibilitychange", refreshWhenVisible);
+      window.removeEventListener("focus", refreshWhenVisible);
+    };
+  }, [loadLiveOverview, tab]);
   const visibleTabs = tabs.filter((item) => !item.superOnly || user?.role === "SUPER_ADMIN");
   const say = (value: string, nextTone: "success" | "error" = "success") => { setTone(nextTone); setMessage(value); };
-  const perform = async (path: string, body: unknown, success: string, method = "POST") => { try { await api(path, { method, body: JSON.stringify(body) }); say(success); await load(); return true; } catch (error) { say(error instanceof Error ? error.message : "Action failed.", "error"); return false; } };
+  const perform = async (path: string, body: unknown, success: string, method = "POST") => { try { await api(path, { method, body: JSON.stringify(body) }); say(success); await load("mutation"); if (tab === "overview") void loadLiveOverview(); return true; } catch (error) { say(error instanceof Error ? error.message : "Action failed.", "error"); return false; } };
 
   useEffect(() => {
     if (user?.role !== "SUPER_ADMIN" || adminScopeInitializedRef.current || !data?.staff.length) return;
@@ -54,23 +134,26 @@ export default function AdminPage() {
   const pendingWithdrawals = data?.transactions.filter((item) => item.type === "WITHDRAWAL" && item.status === "PENDING").length ?? 0;
   const pendingTasks = data?.orders.filter((item) => item.status === "WAITING_ASSIGNMENT").length ?? 0;
   const totalBalance = data?.members.reduce((sum, member) => sum + member.balance, 0) ?? 0;
+  const overviewPendingTopups = liveOverview?.metrics.pendingTopups ?? pendingTopups;
+  const overviewPendingWithdrawals = liveOverview?.metrics.pendingWithdrawals ?? pendingWithdrawals;
   const adminScopePanel = user?.role === "SUPER_ADMIN"
     ? <AdminScopeFilter staff={data?.staff ?? []} selectedAdminId={selectedAdminId} onChange={setSelectedAdminId} />
     : null;
 
   return <div ref={adminRootRef} className="min-h-screen bg-transparent text-slate-900"><header className="sticky top-0 z-40 border-b border-white/70 bg-white/[.97] shadow-[0_10px_35px_rgba(124,45,18,.08)]"><div className="flex h-16 items-center gap-3 px-4 lg:px-6"><button aria-label="Open navigation" className="grid h-10 w-10 place-items-center rounded-xl bg-slate-100 lg:hidden" onClick={() => setMenuOpen(true)}><Menu /></button><Brand compact /><div className="relative ml-auto hidden w-full max-w-md md:block"><Search size={17} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" /><input value={query} onChange={(e) => setQuery(e.target.value)} className="h-10 w-full rounded-xl border border-slate-200 bg-slate-50 pl-10 pr-4 text-sm font-semibold outline-none focus:border-shopee-300" placeholder={t("Search members, orders, and transactions")} /></div><div className="ml-auto flex items-center gap-3 md:ml-0"><LanguageSwitcher compact /><div className="hidden text-right sm:block"><p className="text-sm font-black">{user?.displayName}</p><p className="text-[10px] font-black uppercase tracking-wide text-shopee-500">{user?.role.replace("_", " ")}</p></div><button aria-label={t("Sign out")} onClick={async () => { await logout("admin"); navigate("/admin"); }} className="grid h-10 w-10 place-items-center rounded-xl bg-slate-100 text-slate-600 hover:bg-rose-50 hover:text-rose-600"><LogOut size={18} /></button></div></div></header>
     <div className="flex"><aside className={`${menuOpen ? "fixed inset-0 z-50 flex" : "hidden"} w-full bg-slate-950/50 lg:sticky lg:top-16 lg:flex lg:h-[calc(100vh-4rem)] lg:w-64 lg:bg-transparent`}><div className="h-full w-72 bg-slate-950 p-4 text-white lg:w-full"><div className="mb-5 flex items-center justify-between lg:hidden"><Brand inverse compact /><button aria-label="Close navigation" onClick={() => setMenuOpen(false)}><X /></button></div><nav className="grid gap-1.5">{visibleTabs.map(({ key, label, icon: Icon }) => <button key={key} onClick={() => { setTab(key); setMenuOpen(false); }} className={`flex items-center gap-3 rounded-2xl px-4 py-3 text-left text-sm font-black transition ${tab === key ? "bg-gradient-to-r from-shopee-500 to-orange-500 text-white shadow-lg" : "text-slate-400 hover:bg-white/5 hover:text-white"}`}><Icon size={19} />{t(label)}<ChevronRight size={15} className="ml-auto opacity-40" /></button>)}</nav><div className="mt-6 rounded-2xl border border-white/10 bg-white/5 p-4"><p className="text-[10px] font-black uppercase tracking-[.16em] text-slate-500">{t("Invitation code")}</p><p className="mt-2 text-xl font-black text-white">{user?.invitationCode || "-"}</p><p className="mt-1 text-xs font-semibold text-slate-500">Bonus {money(user?.registrationBonus ?? 0)}</p></div></div><button aria-label="Close navigation overlay" className="flex-1 lg:hidden" onClick={() => setMenuOpen(false)} /></aside>
-      <main className="min-w-0 flex-1 p-4 sm:p-6 lg:p-8"><div className="mx-auto max-w-[1680px]"><div className="flex flex-wrap items-center justify-between gap-4"><div><p className="text-xs font-black uppercase tracking-[.18em] text-shopee-500">Admin command center</p><h1 className="mt-1 text-2xl font-black tracking-tight sm:text-3xl">{t(visibleTabs.find((item) => item.key === tab)?.label ?? "Overview")}</h1></div><Button variant="ghost" loading={refreshing} onClick={load}><RefreshCw size={17} /> {t("Refresh data")}</Button></div>{message && <div className="mt-5"><Notice message={message} tone={tone} onClose={() => setMessage("")} /></div>}
+      <main className="min-w-0 flex-1 p-4 sm:p-6 lg:p-8"><div className="mx-auto max-w-[1680px]"><div className="flex flex-wrap items-center justify-between gap-4"><div><p className="text-xs font-black uppercase tracking-[.18em] text-shopee-500">Admin command center</p><h1 className="mt-1 text-2xl font-black tracking-tight sm:text-3xl">{t(visibleTabs.find((item) => item.key === tab)?.label ?? "Overview")}</h1></div><div className="flex items-center gap-2">{tab === "overview" && <span className="hidden items-center gap-2 rounded-full border border-emerald-100 bg-emerald-50 px-3 py-2 text-[10px] font-black uppercase tracking-wide text-emerald-700 sm:inline-flex"><span className="h-2 w-2 animate-pulse rounded-full bg-emerald-500" /> Live data</span>}<Button variant="ghost" loading={refreshing} onClick={() => { void load("manual"); if (tab === "overview") void loadLiveOverview(); }}><RefreshCw size={17} /> {t("Refresh data")}</Button></div></div>{message && <div className="mt-5"><Notice message={message} tone={tone} onClose={() => setMessage("")} /></div>}
         {!["members", "tasks", "topups", "withdrawals"].includes(tab) && <div className="relative mt-5 md:hidden"><Search size={17} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" /><input value={query} onChange={(e) => setQuery(e.target.value)} className={`${inputClass} pl-10`} placeholder={t("Search data")} /></div>}
-        {tab === "overview" && <Overview members={data?.members.length ?? 0} totalBalance={totalBalance} pendingTopups={pendingTopups} pendingWithdrawals={pendingWithdrawals} pendingTasks={pendingTasks} transactions={data?.transactions ?? []} orders={data?.orders ?? []} dailyAdminStats={data?.dailyAdminStats ?? []} dailyStatsDate={data?.dailyStatsDate ?? ""} showAdminPerformance={user?.role === "SUPER_ADMIN"} />}
-        {tab === "members" && <Members members={filteredMembers} orders={data?.orders ?? []} adminFilterId={selectedAdminId} scopePanel={adminScopePanel} canManage={user?.role === "SUPER_ADMIN"} canManageSecurity={user?.role === "SUPER_ADMIN" || user?.role === "ADMIN"} canManageWithdrawals={user?.role === "SUPER_ADMIN" || user?.role === "ADMIN"} perform={perform} />}
-        {tab === "tasks" && <Tasks orders={filteredOrders} products={data?.taskProducts ?? []} phoneQuery={phoneQuery} onPhoneQueryChange={setPhoneQuery} scopePanel={adminScopePanel} perform={perform} />}
-        {tab === "topups" && <Topups transactions={filteredTopups} phoneQuery={phoneQuery} onPhoneQueryChange={setPhoneQuery} scopePanel={adminScopePanel} canReview={user?.role === "SUPER_ADMIN"} perform={perform} />}
-        {tab === "withdrawals" && <Withdrawals transactions={filteredWithdrawals} phoneQuery={phoneQuery} onPhoneQueryChange={setPhoneQuery} scopePanel={adminScopePanel} canReview={user?.role === "SUPER_ADMIN"} perform={perform} />}
-        {tab === "catalog" && <Catalog products={filteredCatalogProducts} banners={filteredCatalogBanners} productCodes={data?.catalogProducts.map((product) => product.code) ?? []} bannerCodes={data?.catalogBanners.map((banner) => banner.code) ?? []} perform={perform} />}
-        {tab === "rewards" && <RewardSettingsPanel settings={data?.settings ?? {}} perform={perform} />}
-        {tab === "settings" && <SystemSettings supportUrl={data?.settings?.supportUrl ?? ""} banks={data?.banks ?? []} perform={perform} />}
-        {tab === "staff" && <Staff staff={filteredStaff} perform={perform} />}
+        {tab === "overview" ? (liveOverview || data ? <Overview members={liveOverview?.metrics.members ?? data?.members.length ?? 0} totalBalance={liveOverview?.metrics.totalBalance ?? totalBalance} pendingTopups={overviewPendingTopups} pendingWithdrawals={overviewPendingWithdrawals} pendingTasks={liveOverview?.metrics.tasksAwaitingAssignment ?? pendingTasks} transactions={liveOverview?.latestTransactions ?? data?.transactions ?? []} orders={liveOverview?.latestOrders ?? data?.orders ?? []} dailyAdminStats={liveOverview?.dailyAdminStats ?? data?.dailyAdminStats ?? []} dailyStatsDate={liveOverview?.dailyStatsDate ?? data?.dailyStatsDate ?? ""} showAdminPerformance={user?.role === "SUPER_ADMIN"} /> : <AdminDataSkeleton />) : !data ? <AdminDataSkeleton /> : <>
+          {tab === "members" && <Members members={filteredMembers} orders={data.orders} adminFilterId={selectedAdminId} scopePanel={adminScopePanel} canManage={user?.role === "SUPER_ADMIN"} canManageSecurity={user?.role === "SUPER_ADMIN" || user?.role === "ADMIN"} canManageWithdrawals={user?.role === "SUPER_ADMIN" || user?.role === "ADMIN"} perform={perform} />}
+          {tab === "tasks" && <Tasks orders={filteredOrders} products={data.taskProducts} phoneQuery={phoneQuery} onPhoneQueryChange={setPhoneQuery} scopePanel={adminScopePanel} perform={perform} />}
+          {tab === "topups" && <Topups transactions={filteredTopups} phoneQuery={phoneQuery} onPhoneQueryChange={setPhoneQuery} scopePanel={adminScopePanel} canReview={user?.role === "SUPER_ADMIN"} perform={perform} />}
+          {tab === "withdrawals" && <Withdrawals transactions={filteredWithdrawals} phoneQuery={phoneQuery} onPhoneQueryChange={setPhoneQuery} scopePanel={adminScopePanel} canReview={user?.role === "SUPER_ADMIN"} perform={perform} />}
+          {tab === "catalog" && <Catalog products={filteredCatalogProducts} banners={filteredCatalogBanners} productCodes={data.catalogProducts.map((product) => product.code)} bannerCodes={data.catalogBanners.map((banner) => banner.code)} perform={perform} />}
+          {tab === "rewards" && <RewardSettingsPanel settings={data.settings} perform={perform} />}
+          {tab === "settings" && <SystemSettings supportUrl={data.settings?.supportUrl ?? ""} banks={data.banks} perform={perform} />}
+          {tab === "staff" && <Staff staff={filteredStaff} perform={perform} />}
+        </>}
       </div></main>
     </div>
   </div>;
@@ -133,6 +216,32 @@ function useAdminTextTranslation(rootRef: React.RefObject<HTMLDivElement | null>
     observer.observe(root, { childList: true, characterData: true, subtree: true });
     return () => observer.disconnect();
   }, [language, rootRef]);
+}
+
+function AdminDataSkeleton() {
+  return <div aria-label="Loading administrator data" aria-busy="true" className="mt-6 animate-pulse">
+    <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      {[0, 1, 2, 3].map((item) => <Card key={item} className="p-5">
+        <div className="h-11 w-11 rounded-2xl bg-slate-100" />
+        <div className="mt-6 h-7 w-24 rounded-lg bg-slate-100" />
+        <div className="mt-2 h-3 w-32 rounded bg-slate-100" />
+      </Card>)}
+    </div>
+    <Card className="mt-5 overflow-hidden">
+      <div className="border-b border-slate-100 p-5">
+        <div className="h-5 w-60 max-w-full rounded bg-slate-100" />
+        <div className="mt-2 h-3 w-96 max-w-full rounded bg-slate-100" />
+      </div>
+      <div className="space-y-3 p-5">
+        {[0, 1, 2, 3].map((item) => <div key={item} className="grid grid-cols-[minmax(110px,.6fr)_repeat(3,1fr)] gap-4">
+          <div className="h-9 rounded-xl bg-slate-100" />
+          <div className="h-9 rounded-xl bg-slate-100" />
+          <div className="h-9 rounded-xl bg-slate-100" />
+          <div className="h-9 rounded-xl bg-slate-100" />
+        </div>)}
+      </div>
+    </Card>
+  </div>;
 }
 
 function Overview({ members, totalBalance, pendingTopups, pendingWithdrawals, pendingTasks, transactions, orders, dailyAdminStats, dailyStatsDate, showAdminPerformance }: { members: number; totalBalance: number; pendingTopups: number; pendingWithdrawals: number; pendingTasks: number; transactions: Transaction[]; orders: Order[]; dailyAdminStats: DailyAdminStat[]; dailyStatsDate: string; showAdminPerformance: boolean }) {

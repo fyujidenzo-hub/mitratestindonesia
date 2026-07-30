@@ -78,7 +78,9 @@ model User {
   auditLogs           AuditLog[]
 
   @@index([referrerId])
+  @@index([referrerId, createdAt], map: "User_referrerId_createdAt_idx")
   @@index([role, isActive])
+  @@index([role, createdAt], map: "User_role_createdAt_idx")
   @@index([phone(ops: raw("text_pattern_ops"))], map: "User_phone_prefix_idx")
   @@index([lastSeenAt], map: "User_lastSeenAt_idx")
 }
@@ -176,6 +178,7 @@ model Transaction {
 
   @@index([userId, createdAt])
   @@index([status, type, createdAt])
+  @@index([createdAt], map: "Transaction_createdAt_idx")
 }
 
 model Order {
@@ -204,7 +207,10 @@ model Order {
   events OrderEvent[]
 
   @@index([userId, status])
+  @@index([userId, createdAt, id], map: "Order_userId_createdAt_id_idx")
   @@index([adminId, createdAt])
+  @@index([status, createdAt], map: "Order_status_createdAt_idx")
+  @@index([createdAt], map: "Order_createdAt_idx")
 }
 
 model OrderItem {

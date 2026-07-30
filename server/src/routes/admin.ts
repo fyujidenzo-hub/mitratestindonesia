@@ -217,28 +217,92 @@ function jakartaDayBounds(now = new Date()) {
   return { date, start, end };
 }
 
+type DailyFinancialActivityRow = {
+  referrerId: string;
+  type: TransactionType;
+  transactionCount: bigint;
+  totalAmount: bigint;
+};
+
+type OrderSequenceRow = {
+  id: string;
+  taskSequence: bigint;
+};
+
+async function dailyFinancialActivity(start: Date, end: Date) {
+  return prisma.$queryRaw<DailyFinancialActivityRow[]>(Prisma.sql`
+    SELECT
+      customer."referrerId" AS "referrerId",
+      tx."type" AS "type",
+      COUNT(*)::bigint AS "transactionCount",
+      COALESCE(SUM(tx."amount"), 0)::bigint AS "totalAmount"
+    FROM "Transaction" AS tx
+    INNER JOIN "User" AS customer ON customer."id" = tx."userId"
+    WHERE tx."type" IN (
+      ${TransactionType.TOPUP}::"TransactionType",
+      ${TransactionType.WITHDRAWAL}::"TransactionType"
+    )
+      AND tx."status" = ${TransactionStatus.APPROVED}::"TransactionStatus"
+      AND tx."createdAt" >= ${start}
+      AND tx."createdAt" < ${end}
+      AND customer."referrerId" IS NOT NULL
+    GROUP BY customer."referrerId", tx."type"
+  `);
+}
+
+async function orderTaskSequences(orderIds: string[]) {
+  if (!orderIds.length) return new Map<string, number>();
+
+  const rows = await prisma.$queryRaw<OrderSequenceRow[]>(Prisma.sql`
+    SELECT
+      current_order."id",
+      (
+        SELECT COUNT(*)::bigint
+        FROM "Order" AS historical_order
+        WHERE historical_order."userId" = current_order."userId"
+          AND (
+            historical_order."createdAt" < current_order."createdAt"
+            OR (
+              historical_order."createdAt" = current_order."createdAt"
+              AND historical_order."id" <= current_order."id"
+            )
+          )
+      ) AS "taskSequence"
+    FROM "Order" AS current_order
+    WHERE current_order."id" IN (${Prisma.join(orderIds)})
+  `);
+
+  return new Map(rows.map((row) => [row.id, Number(row.taskSequence)]));
+}
+
 router.use(authenticateAdmin, requireRole(...staffRoles));
 router.use(asyncHandler(async (request: AuthRequest, _response, next) => {
-  const activeStaff = await prisma.user.findFirst({
-    where: { id: request.auth!.id, role: { in: staffRoles }, isActive: true },
-    select: { id: true },
+  const activeStaff = await prisma.user.findUnique({
+    where: { id: request.auth!.id },
+    select: { role: true, isActive: true },
   });
-  if (!activeStaff) throw new HttpError(401, "This administrator account has been deactivated.");
+  if (!activeStaff?.isActive || !staffRoles.includes(activeStaff.role)) {
+    throw new HttpError(401, "This administrator account has been deactivated.");
+  }
   next();
 }));
 
 router.get(
   "/overview",
   asyncHandler(async (request: AuthRequest, response) => {
-    const scopedUserIds = request.auth!.role === UserRole.SUPER_ADMIN
-      ? undefined
-      : (await prisma.user.findMany({ where: { referrerId: request.auth!.id }, select: { id: true } })).map((user) => user.id);
-    const userFilter = scopedUserIds ? { id: { in: scopedUserIds } } : { role: UserRole.CUSTOMER };
-    const transactionFilter = scopedUserIds ? { userId: { in: scopedUserIds } } : {};
-    const orderFilter = scopedUserIds ? { userId: { in: scopedUserIds } } : {};
+    const isSuperAdmin = request.auth!.role === UserRole.SUPER_ADMIN;
+    const userFilter: Prisma.UserWhereInput = isSuperAdmin
+      ? { role: UserRole.CUSTOMER }
+      : { role: UserRole.CUSTOMER, referrerId: request.auth!.id };
+    const transactionFilter: Prisma.TransactionWhereInput = isSuperAdmin
+      ? {}
+      : { user: { referrerId: request.auth!.id } };
+    const orderFilter: Prisma.OrderWhereInput = isSuperAdmin
+      ? {}
+      : { user: { referrerId: request.auth!.id } };
 
     const jakartaDay = jakartaDayBounds();
-    const [members, transactions, orders, taskProducts, catalogProducts, catalogBanners, banks, staff, settings, dailyRegistrations, dailyTransactions] = await Promise.all([
+    const [members, transactions, orders, taskProducts, catalogProducts, catalogBanners, banks, staff, settings, dailyRegistrations, dailyFinancialRows] = await Promise.all([
       prisma.user.findMany({ where: userFilter, select: { id: true, username: true, displayName: true, phone: true, balance: true, level: true, totalOrders: true, withdrawalLocked: true, withdrawalRemarks: true, isActive: true, createdAt: true, lastLoginAt: true, lastSeenAt: true, referrer: { select: { id: true, displayName: true, invitationCode: true, adminCode: true } } }, orderBy: { createdAt: "desc" } }),
       prisma.transaction.findMany({ where: transactionFilter, include: { user: { select: { username: true, displayName: true, phone: true, referrer: { select: { id: true, displayName: true, adminCode: true } } } }, reviewer: { select: { displayName: true, adminCode: true } } }, orderBy: { createdAt: "desc" }, take: 200 }),
       prisma.order.findMany({ where: orderFilter, include: { user: { select: { username: true, displayName: true, phone: true, balance: true, totalOrders: true, level: true, referrer: { select: { id: true, displayName: true, adminCode: true } } } }, admin: { select: { id: true, displayName: true, adminCode: true } }, items: true }, orderBy: { createdAt: "desc" }, take: 200 }),
@@ -246,62 +310,42 @@ router.get(
       prisma.catalogProduct.findMany({ orderBy: [{ price: "asc" }, { name: "asc" }] }),
       prisma.catalogBanner.findMany({ orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }] }),
       prisma.bank.findMany({ orderBy: { updatedAt: "desc" } }),
-      request.auth!.role === UserRole.SUPER_ADMIN
+      isSuperAdmin
         ? prisma.user.findMany({ where: { role: { in: staffRoles } }, select: staffSelect, orderBy: [{ isActive: "desc" }, { createdAt: "asc" }] })
         : Promise.resolve([]),
       prisma.siteSetting.findMany(),
-      request.auth!.role === UserRole.SUPER_ADMIN
+      isSuperAdmin
         ? prisma.user.groupBy({
           by: ["referrerId"],
           where: { role: UserRole.CUSTOMER, referrerId: { not: null }, createdAt: { gte: jakartaDay.start, lt: jakartaDay.end } },
           _count: { _all: true },
         })
         : Promise.resolve([]),
-      request.auth!.role === UserRole.SUPER_ADMIN
-        ? prisma.transaction.findMany({
-          where: {
-            type: { in: [TransactionType.TOPUP, TransactionType.WITHDRAWAL] },
-            status: TransactionStatus.APPROVED,
-            createdAt: { gte: jakartaDay.start, lt: jakartaDay.end },
-            user: { referrerId: { not: null } },
-          },
-          select: { type: true, amount: true, user: { select: { referrerId: true } } },
-        })
+      isSuperAdmin
+        ? dailyFinancialActivity(jakartaDay.start, jakartaDay.end)
         : Promise.resolve([]),
     ]);
     const registrationCounts = new Map(dailyRegistrations.map((row) => [row.referrerId, row._count._all]));
-    const orderUserIds = [...new Set(orders.map((order) => order.userId))];
-    const orderSequenceRows = orderUserIds.length
-      ? await prisma.order.findMany({
-        where: { userId: { in: orderUserIds } },
-        select: { id: true, userId: true },
-        orderBy: [{ userId: "asc" }, { createdAt: "asc" }, { id: "asc" }],
-      })
-      : [];
-    const orderSequenceById = new Map<string, number>();
-    const nextOrderSequenceByUser = new Map<string, number>();
-    for (const order of orderSequenceRows) {
-      const sequence = (nextOrderSequenceByUser.get(order.userId) ?? 0) + 1;
-      nextOrderSequenceByUser.set(order.userId, sequence);
-      orderSequenceById.set(order.id, sequence);
-    }
+    const orderSequenceById = await orderTaskSequences(orders.map((order) => order.id));
     const sequencedOrders = orders.map((order) => ({
       ...order,
       taskSequence: orderSequenceById.get(order.id) ?? 1,
     }));
+    const financialActivityByAdmin = new Map(
+      dailyFinancialRows.map((row) => [`${row.referrerId}:${row.type}`, row]),
+    );
     const dailyAdminStats = staff.map((staffMember) => {
-      const adminTransactions = dailyTransactions.filter((transaction) => transaction.user.referrerId === staffMember.id);
-      const topups = adminTransactions.filter((transaction) => transaction.type === TransactionType.TOPUP);
-      const withdrawals = adminTransactions.filter((transaction) => transaction.type === TransactionType.WITHDRAWAL);
+      const topups = financialActivityByAdmin.get(`${staffMember.id}:${TransactionType.TOPUP}`);
+      const withdrawals = financialActivityByAdmin.get(`${staffMember.id}:${TransactionType.WITHDRAWAL}`);
       return {
         adminId: staffMember.id,
         displayName: staffMember.displayName,
         adminCode: staffMember.adminCode,
         registrations: registrationCounts.get(staffMember.id) ?? 0,
-        topupCount: topups.length,
-        topupAmount: topups.reduce((sum, transaction) => sum + transaction.amount, 0n),
-        withdrawalCount: withdrawals.length,
-        withdrawalAmount: withdrawals.reduce((sum, transaction) => sum + transaction.amount, 0n),
+        topupCount: Number(topups?.transactionCount ?? 0n),
+        topupAmount: topups?.totalAmount ?? 0n,
+        withdrawalCount: Number(withdrawals?.transactionCount ?? 0n),
+        withdrawalAmount: withdrawals?.totalAmount ?? 0n,
       };
     });
     const selectedBankIndex = banks.findIndex((bank) => bank.active);
@@ -321,6 +365,143 @@ router.get(
       dailyAdminStats,
       dailyStatsDate: jakartaDay.date,
       settings: Object.fromEntries(settings.map((setting) => [setting.key, setting.value])),
+    }));
+  }),
+);
+
+router.get(
+  "/overview/live",
+  asyncHandler(async (request: AuthRequest, response) => {
+    response.setHeader("Cache-Control", "private, no-store");
+    const isSuperAdmin = request.auth!.role === UserRole.SUPER_ADMIN;
+    const userFilter: Prisma.UserWhereInput = isSuperAdmin
+      ? { role: UserRole.CUSTOMER }
+      : { role: UserRole.CUSTOMER, referrerId: request.auth!.id };
+    const transactionFilter: Prisma.TransactionWhereInput = isSuperAdmin
+      ? {}
+      : { user: { referrerId: request.auth!.id } };
+    const orderFilter: Prisma.OrderWhereInput = isSuperAdmin
+      ? {}
+      : { user: { referrerId: request.auth!.id } };
+    const jakartaDay = jakartaDayBounds();
+
+    const [
+      memberTotals,
+      pendingFinance,
+      pendingTasks,
+      latestTransactions,
+      latestOrders,
+      staff,
+      dailyRegistrations,
+      dailyFinancialRows,
+    ] = await Promise.all([
+      prisma.user.aggregate({
+        where: userFilter,
+        _count: { _all: true },
+        _sum: { balance: true },
+      }),
+      prisma.transaction.groupBy({
+        by: ["type"],
+        where: {
+          ...transactionFilter,
+          type: { in: [TransactionType.TOPUP, TransactionType.WITHDRAWAL] },
+          status: TransactionStatus.PENDING,
+        },
+        _count: { _all: true },
+      }),
+      prisma.order.count({
+        where: { ...orderFilter, status: OrderStatus.WAITING_ASSIGNMENT },
+      }),
+      prisma.transaction.findMany({
+        where: transactionFilter,
+        select: {
+          id: true,
+          requestNumber: true,
+          type: true,
+          amount: true,
+          status: true,
+          createdAt: true,
+          user: { select: { displayName: true } },
+        },
+        orderBy: { createdAt: "desc" },
+        take: 6,
+      }),
+      prisma.order.findMany({
+        where: orderFilter,
+        select: {
+          id: true,
+          referenceNumber: true,
+          status: true,
+          createdAt: true,
+          user: { select: { displayName: true } },
+          items: { select: { productName: true }, take: 1 },
+        },
+        orderBy: { createdAt: "desc" },
+        take: 6,
+      }),
+      isSuperAdmin
+        ? prisma.user.findMany({
+          where: { role: { in: staffRoles } },
+          select: staffSelect,
+          orderBy: [{ isActive: "desc" }, { createdAt: "asc" }],
+        })
+        : Promise.resolve([]),
+      isSuperAdmin
+        ? prisma.user.groupBy({
+          by: ["referrerId"],
+          where: {
+            role: UserRole.CUSTOMER,
+            referrerId: { not: null },
+            createdAt: { gte: jakartaDay.start, lt: jakartaDay.end },
+          },
+          _count: { _all: true },
+        })
+        : Promise.resolve([]),
+      isSuperAdmin
+        ? dailyFinancialActivity(jakartaDay.start, jakartaDay.end)
+        : Promise.resolve([]),
+    ]);
+
+    const pendingFinanceByType = new Map(
+      pendingFinance.map((row) => [row.type, row._count._all]),
+    );
+    const registrationCounts = new Map(
+      dailyRegistrations.map((row) => [row.referrerId, row._count._all]),
+    );
+    const financialActivityByAdmin = new Map(
+      dailyFinancialRows.map((row) => [`${row.referrerId}:${row.type}`, row]),
+    );
+    const dailyAdminStats = staff.map((staffMember) => {
+      const topups = financialActivityByAdmin.get(`${staffMember.id}:${TransactionType.TOPUP}`);
+      const withdrawals = financialActivityByAdmin.get(`${staffMember.id}:${TransactionType.WITHDRAWAL}`);
+      return {
+        adminId: staffMember.id,
+        displayName: staffMember.displayName,
+        adminCode: staffMember.adminCode,
+        registrations: registrationCounts.get(staffMember.id) ?? 0,
+        topupCount: Number(topups?.transactionCount ?? 0n),
+        topupAmount: topups?.totalAmount ?? 0n,
+        withdrawalCount: Number(withdrawals?.transactionCount ?? 0n),
+        withdrawalAmount: withdrawals?.totalAmount ?? 0n,
+      };
+    });
+    const pendingTopups = pendingFinanceByType.get(TransactionType.TOPUP) ?? 0;
+    const pendingWithdrawals = pendingFinanceByType.get(TransactionType.WITHDRAWAL) ?? 0;
+
+    response.json(jsonSafe({
+      metrics: {
+        members: memberTotals._count._all,
+        totalBalance: memberTotals._sum.balance ?? 0n,
+        financeRequests: pendingTopups + pendingWithdrawals,
+        pendingTopups,
+        pendingWithdrawals,
+        tasksAwaitingAssignment: pendingTasks,
+      },
+      dailyAdminStats,
+      dailyStatsDate: jakartaDay.date,
+      latestTransactions,
+      latestOrders,
+      refreshedAt: new Date(),
     }));
   }),
 );
