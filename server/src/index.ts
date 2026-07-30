@@ -1,6 +1,7 @@
 import "dotenv/config";
 import { existsSync } from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 import express from "express";
 import cors from "cors";
 import cookieParser from "cookie-parser";
@@ -43,20 +44,36 @@ app.use("/api/customer", customerRoutes);
 app.use("/api/admin", adminRoutes);
 
 if (process.env.NODE_ENV === "production") {
-  const rootClientDist = path.resolve("client/dist");
-  const clientDist = existsSync(rootClientDist) ? rootClientDist : path.resolve("../client/dist");
+  const moduleDirectory = path.dirname(fileURLToPath(import.meta.url));
+  const clientDistCandidates = [
+    path.resolve(moduleDirectory, "../client"),
+    path.resolve(process.cwd(), "client/dist"),
+    path.resolve(process.cwd(), "../client/dist"),
+    path.resolve(moduleDirectory, "../../../client/dist"),
+  ];
+  const clientDist = clientDistCandidates.find((candidate) =>
+    existsSync(path.join(candidate, "index.html")),
+  );
+
+  if (!clientDist) {
+    console.error("Client build not found. Checked:", clientDistCandidates);
+  }
+
   app.use(
-    express.static(clientDist, {
+    express.static(clientDist || path.resolve(moduleDirectory, "../client"), {
       index: false,
       maxAge: "1h",
     }),
   );
 
-  app.use((_request, response) =>
-    response
+  app.use((_request, response, next) => {
+    if (!clientDist) {
+      return next(new Error("The client application was not included in the production build."));
+    }
+    return response
       .set("Cache-Control", "no-cache")
-      .sendFile(path.join(clientDist, "index.html")),
-  );
+      .sendFile(path.join(clientDist, "index.html"));
+  });
 }
 
 app.use((error: unknown, _request: express.Request, response: express.Response, _next: express.NextFunction) => {
