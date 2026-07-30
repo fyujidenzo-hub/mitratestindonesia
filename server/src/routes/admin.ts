@@ -121,6 +121,17 @@ const bankInputSchema = z.object({
   bankName: z.string().trim().min(2).max(80),
   accountNumber: z.string().trim().min(4).max(64).regex(/^[a-zA-Z0-9 .-]+$/, "Use letters, numbers, spaces, dots, or dashes only."),
   accountName: z.string().trim().min(2).max(120),
+  minimumDeposit: z.coerce.number().int().min(10_000).max(1_000_000_000_000),
+  maximumDeposit: z.coerce.number().int().min(10_000).max(1_000_000_000_000),
+  active: z.boolean(),
+}).superRefine((bank, context) => {
+  if (bank.maximumDeposit < bank.minimumDeposit) {
+    context.addIssue({
+      code: "custom",
+      path: ["maximumDeposit"],
+      message: "Maximum top-up must be greater than or equal to the minimum top-up.",
+    });
+  }
 });
 
 const rewardSettingsInputSchema = z.object({
@@ -259,6 +270,25 @@ router.get(
         : Promise.resolve([]),
     ]);
     const registrationCounts = new Map(dailyRegistrations.map((row) => [row.referrerId, row._count._all]));
+    const orderUserIds = [...new Set(orders.map((order) => order.userId))];
+    const orderSequenceRows = orderUserIds.length
+      ? await prisma.order.findMany({
+        where: { userId: { in: orderUserIds } },
+        select: { id: true, userId: true },
+        orderBy: [{ userId: "asc" }, { createdAt: "asc" }, { id: "asc" }],
+      })
+      : [];
+    const orderSequenceById = new Map<string, number>();
+    const nextOrderSequenceByUser = new Map<string, number>();
+    for (const order of orderSequenceRows) {
+      const sequence = (nextOrderSequenceByUser.get(order.userId) ?? 0) + 1;
+      nextOrderSequenceByUser.set(order.userId, sequence);
+      orderSequenceById.set(order.id, sequence);
+    }
+    const sequencedOrders = orders.map((order) => ({
+      ...order,
+      taskSequence: orderSequenceById.get(order.id) ?? 1,
+    }));
     const dailyAdminStats = staff.map((staffMember) => {
       const adminTransactions = dailyTransactions.filter((transaction) => transaction.user.referrerId === staffMember.id);
       const topups = adminTransactions.filter((transaction) => transaction.type === TransactionType.TOPUP);
@@ -282,7 +312,7 @@ router.get(
     response.json(jsonSafe({
       members,
       transactions,
-      orders,
+      orders: sequencedOrders,
       taskProducts,
       catalogProducts,
       catalogBanners,
@@ -436,16 +466,20 @@ router.post(
     if (duplicate) throw new HttpError(409, "That bank account is already registered.");
 
     const bank = await prisma.$transaction(async (database) => {
-      const selectedBank = await database.bank.findFirst({
-        where: { active: true },
-        select: { id: true },
-      });
+      if (input.active) {
+        await database.bank.updateMany({
+          where: { active: true },
+          data: { active: false },
+        });
+      }
       const created = await database.bank.create({
         data: {
           bankName: input.bankName,
           accountNumber: input.accountNumber,
           accountName: input.accountName,
-          active: !selectedBank,
+          minimumDeposit: BigInt(input.minimumDeposit),
+          maximumDeposit: BigInt(input.maximumDeposit),
+          active: input.active,
         },
       });
       await database.auditLog.create({
@@ -458,6 +492,9 @@ router.post(
             bankName: created.bankName,
             accountNumber: created.accountNumber,
             accountName: created.accountName,
+            minimumDeposit: created.minimumDeposit.toString(),
+            maximumDeposit: created.maximumDeposit.toString(),
+            active: created.active,
           },
         },
       });
@@ -488,12 +525,21 @@ router.patch(
     if (duplicate) throw new HttpError(409, "That bank account is already registered.");
 
     const bank = await prisma.$transaction(async (database) => {
+      if (input.active) {
+        await database.bank.updateMany({
+          where: { active: true, id: { not: bankId } },
+          data: { active: false },
+        });
+      }
       const updated = await database.bank.update({
         where: { id: bankId },
         data: {
           bankName: input.bankName,
           accountNumber: input.accountNumber,
           accountName: input.accountName,
+          minimumDeposit: BigInt(input.minimumDeposit),
+          maximumDeposit: BigInt(input.maximumDeposit),
+          active: input.active,
         },
       });
       await database.auditLog.create({
@@ -507,11 +553,17 @@ router.patch(
               bankName: existing.bankName,
               accountNumber: existing.accountNumber,
               accountName: existing.accountName,
+              minimumDeposit: existing.minimumDeposit.toString(),
+              maximumDeposit: existing.maximumDeposit.toString(),
+              active: existing.active,
             },
             updated: {
               bankName: updated.bankName,
               accountNumber: updated.accountNumber,
               accountName: updated.accountName,
+              minimumDeposit: updated.minimumDeposit.toString(),
+              maximumDeposit: updated.maximumDeposit.toString(),
+              active: updated.active,
             },
           },
         },
@@ -570,18 +622,6 @@ router.delete(
 
     await prisma.$transaction(async (database) => {
       await database.bank.delete({ where: { id: bankId } });
-      if (existing.active) {
-        const fallback = await database.bank.findFirst({
-          orderBy: { createdAt: "asc" },
-          select: { id: true },
-        });
-        if (fallback) {
-          await database.bank.update({
-            where: { id: fallback.id },
-            data: { active: true },
-          });
-        }
-      }
       await database.auditLog.create({
         data: {
           actorId: request.auth!.id,
@@ -803,10 +843,25 @@ router.post(
   "/members/:id/reward",
   requireRole(UserRole.SUPER_ADMIN),
   asyncHandler(async (request: AuthRequest, response) => {
-    const input = z.object({ amount: z.number().int().positive().max(100000000), note: z.string().trim().max(240).optional() }).parse(request.body);
+    const input = z.object({
+      amount: z.number().int().positive().max(100000000),
+      description: z.string().trim().min(1, "A description is required.").max(500),
+    }).parse(request.body);
     const result = await prisma.$transaction(async (database) => {
       const user = await database.user.update({ where: { id: String(request.params.id) }, data: { balance: { increment: BigInt(input.amount) } } });
-      const transaction = await database.transaction.create({ data: { requestNumber: requestNumber("RW"), userId: user.id, reviewerId: request.auth!.id, type: TransactionType.REWARD, amount: BigInt(input.amount), status: TransactionStatus.APPROVED, senderName: input.note || "Super Admin Bonus", creditedAt: new Date(), reviewedAt: new Date() } });
+      const transaction = await database.transaction.create({
+        data: {
+          requestNumber: requestNumber("RW"),
+          userId: user.id,
+          reviewerId: request.auth!.id,
+          type: TransactionType.REWARD,
+          amount: BigInt(input.amount),
+          status: TransactionStatus.APPROVED,
+          description: input.description,
+          creditedAt: new Date(),
+          reviewedAt: new Date(),
+        },
+      });
       return { user, transaction };
     });
     response.json(jsonSafe(result));

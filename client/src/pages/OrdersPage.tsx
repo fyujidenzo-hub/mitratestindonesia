@@ -236,19 +236,9 @@ export default function OrdersPage() {
 
         <section className="mt-8">
           <h2 className="text-xl font-black text-slate-900">{t("Order history")}</h2>
-          <div className="mt-4 grid min-w-0 gap-3">
+          <div className="mt-4 grid min-w-0 gap-4">
             {orders.filter((order) => order.id !== active?.id && order.id !== completedOrder?.id).map((order) => (
-              <Card key={order.id} className="flex min-w-0 flex-col gap-3 p-4 sm:flex-row sm:items-center">
-                <div className="grid h-11 w-11 shrink-0 place-items-center rounded-2xl bg-slate-100 text-slate-500">{order.status === "DELIVERED" ? <CheckCircle2 /> : <Clock3 />}</div>
-                <div className="min-w-0 flex-1">
-                  <p className="break-words font-black leading-snug text-slate-900 sm:truncate">{order.items[0]?.productName || "Task without a product"}</p>
-                  <p className="mt-1 break-all text-xs font-semibold text-slate-400">{order.referenceNumber} · {dateTime(order.createdAt)}</p>
-                </div>
-                <div className="flex items-center justify-between gap-3 sm:block sm:text-right">
-                  <StatusPill status={order.status} />
-                  {order.status === "DELIVERED" && <p className="mt-1 text-xs font-black text-emerald-600">+{money(order.commission)}</p>}
-                </div>
-              </Card>
+              <OrderHistoryCard key={order.id} order={order} />
             ))}
           </div>
         </section>
@@ -343,5 +333,71 @@ function CompletedTaskCard({ order }: { order: Order }) {
         </div>
       </div>
     </Card>
+  );
+}
+
+function OrderHistoryCard({ order }: { order: Order }) {
+  const { t } = useI18n();
+  const item = order.items[0];
+  const imageUrl = item?.product_image_url || item?.product?.imageUrl;
+  const delivered = order.status === "DELIVERED";
+  const transactionDate = order.completedAt || order.createdAt;
+
+  return (
+    <Card className="min-w-0 overflow-hidden border-slate-200 p-0 shadow-[0_14px_34px_rgba(15,23,42,0.06)]">
+      <div className="flex flex-wrap items-start justify-between gap-3 border-b border-slate-100 bg-slate-50/80 px-4 py-3.5 sm:px-5">
+        <div className="min-w-0">
+          <p className="text-[10px] font-black uppercase tracking-[.16em] text-slate-400">{t("Transaction number")}</p>
+          <p className="mt-1 break-all text-sm font-black text-slate-900">{order.referenceNumber}</p>
+        </div>
+        {delivered ? (
+          <span className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-emerald-50 px-3 py-1.5 text-[11px] font-black uppercase tracking-wide text-emerald-700 ring-1 ring-inset ring-emerald-100">
+            <CheckCircle2 size={14} />
+            {t("Delivered")}
+          </span>
+        ) : (
+          <StatusPill status={order.status} />
+        )}
+      </div>
+
+      <div className="grid min-w-0 grid-cols-[76px_minmax(0,1fr)] gap-3 p-4 sm:grid-cols-[104px_minmax(0,1fr)] sm:gap-5 sm:p-5">
+        <div className="aspect-square w-full overflow-hidden rounded-2xl border border-slate-100 bg-slate-50">
+          {imageUrl ? (
+            <img
+              src={imageUrl}
+              alt={item?.productName || "Order product"}
+              loading="lazy"
+              decoding="async"
+              className="h-full w-full object-cover"
+            />
+          ) : (
+            <div className="grid h-full place-items-center text-slate-300"><ShoppingBag size={28} /></div>
+          )}
+        </div>
+
+        <div className="min-w-0">
+          <p className="text-[10px] font-black uppercase tracking-[.14em] text-shopee-500">{t("Product")}</p>
+          <h3 className="mt-1 break-words text-sm font-black leading-snug text-slate-900 sm:text-base">
+            {item?.productName || "Task without a product"}
+          </h3>
+          {item?.productCode && <p className="mt-1 break-all text-[11px] font-bold text-slate-400">{item.productCode}</p>}
+
+          <div className="mt-4 grid gap-3 border-t border-slate-100 pt-3 sm:grid-cols-3">
+            <HistoryMetric label={t("Order price")} value={money(order.totalValue)} />
+            <HistoryMetric label={t("Commission")} value={`+${money(order.commission)}`} accent />
+            <HistoryMetric label={t("Transaction date")} value={dateTime(transactionDate)} />
+          </div>
+        </div>
+      </div>
+    </Card>
+  );
+}
+
+function HistoryMetric({ label, value, accent = false }: { label: string; value: string; accent?: boolean }) {
+  return (
+    <div className="min-w-0">
+      <p className="text-[10px] font-black uppercase tracking-wide text-slate-400">{label}</p>
+      <p className={`mt-1 break-words text-xs font-black sm:text-sm ${accent ? "text-emerald-600" : "text-slate-800"}`}>{value}</p>
+    </div>
   );
 }

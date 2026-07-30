@@ -132,7 +132,7 @@ function buildNotifications(orders: Order[], transactions: Transaction[]): Notif
   });
 
   const transactionItems = transactions.map((transaction): NotificationItem => {
-    if (transaction.type === "REWARD") return { id: `transaction:${transaction.id}:${transaction.status}`, title: "Reward credited", description: `${transaction.senderName || "Task milestone reward"}: +${money(transaction.amount)}`, createdAt: transaction.createdAt, to: "/history", kind: "reward" };
+    if (transaction.type === "REWARD") return { id: `transaction:${transaction.id}:${transaction.status}`, title: "Reward credited", description: `${transaction.description || transaction.senderName || "Task milestone reward"}: +${money(transaction.amount)}`, createdAt: transaction.createdAt, to: "/history", kind: "reward" };
     const label = transaction.type === "TOPUP" ? "Top-up" : "Withdrawal";
     return { id: `transaction:${transaction.id}:${transaction.status}`, title: `${label} ${transaction.status.toLowerCase()}`, description: `${money(transaction.amount)} · ${transaction.requestNumber}`, createdAt: transaction.createdAt, to: transaction.type === "TOPUP" ? "/finance?tab=topup" : "/finance?tab=withdraw", kind: "finance" };
   });

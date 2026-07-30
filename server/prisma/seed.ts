@@ -118,8 +118,8 @@ for (const banner of catalogBanners) {
   if ((await prisma.bank.count()) === 0) {
     await prisma.bank.createMany({
       data: [
-        { bankName: "BCA", accountName: "Shopee Work Indonesia", accountNumber: "881044552100", minimumDeposit: 100000n, active: true },
-        { bankName: "Mandiri", accountName: "Shopee Work Indonesia", accountNumber: "133099004432", minimumDeposit: 100000n, active: true },
+        { bankName: "BCA", accountName: "Shopee Work Indonesia", accountNumber: "881044552100", minimumDeposit: 100000n, maximumDeposit: 100000000n, active: true },
+        { bankName: "Mandiri", accountName: "Shopee Work Indonesia", accountNumber: "133099004432", minimumDeposit: 100000n, maximumDeposit: 100000000n, active: false },
       ],
     });
   }

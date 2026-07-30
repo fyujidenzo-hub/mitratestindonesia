@@ -95,7 +95,16 @@ router.get(
     const rewardSettings = rewardSettingsFromValues(
       Object.fromEntries(rewardSettingRows.map((setting) => [setting.key, setting.value])),
     );
-    response.json(jsonSafe({ user: safeUser, transactions, orders, rewardSettings }));
+    const historyReadyOrders = orders.map((order) => ({
+      ...order,
+      items: order.items.map((item) => ({
+        ...item,
+        // Keep the existing Product relation for compatibility while exposing
+        // a stable, explicit field for completed-order history clients.
+        product_image_url: item.product?.imageUrl ?? null,
+      })),
+    }));
+    response.json(jsonSafe({ user: safeUser, transactions, orders: historyReadyOrders, rewardSettings }));
   }),
 );
 
@@ -151,14 +160,31 @@ router.post(
   "/topups",
   upload.single("proof"),
   asyncHandler(async (request: AuthRequest, response) => {
-    const input = z.object({ amount: z.coerce.number().int().min(10000).max(100000000), senderName: z.string().trim().min(2).max(120) }).parse(request.body);
+    const input = z.object({
+      amount: z.coerce.number().int().min(10_000).max(1_000_000_000_000),
+      senderName: z.string().trim().min(2).max(120),
+    }).parse(request.body);
     if (!request.file) throw new HttpError(400, "A payment proof image is required.");
+    const activeBank = await prisma.bank.findFirst({
+      where: { active: true },
+      orderBy: { updatedAt: "desc" },
+      select: { bankName: true, minimumDeposit: true, maximumDeposit: true },
+    });
+    if (!activeBank) throw new HttpError(400, "Top-up requests are temporarily unavailable because no bank account is active.");
+
+    const amount = BigInt(input.amount);
+    if (amount < activeBank.minimumDeposit || amount > activeBank.maximumDeposit) {
+      const minimum = activeBank.minimumDeposit.toLocaleString("id-ID");
+      const maximum = activeBank.maximumDeposit.toLocaleString("id-ID");
+      throw new HttpError(400, `The top-up amount for ${activeBank.bankName} must be between Rp ${minimum} and Rp ${maximum}.`);
+    }
+
     const transaction = await prisma.transaction.create({
       data: {
         requestNumber: requestNumber("TU"),
         userId: request.auth!.id,
         type: TransactionType.TOPUP,
-        amount: BigInt(input.amount),
+        amount,
         senderName: input.senderName,
         proofPath: request.file.filename,
         proofOriginalName: request.file.originalname,
@@ -274,6 +300,7 @@ router.post(
         .find((milestone) => milestone.task === completedUser.totalOrders);
       const rewardAmount = BigInt(configuredMilestone?.amount ?? 0);
       if (rewardAmount > 0n) {
+        const rewardDescription = `Bonus Reward for Completing the ${ordinal(completedUser.totalOrders)} Task`;
         await database.user.update({ where: { id: request.auth!.id }, data: { balance: { increment: rewardAmount } } });
         await database.transaction.create({
           data: {
@@ -282,7 +309,8 @@ router.post(
             type: TransactionType.REWARD,
             amount: rewardAmount,
             status: TransactionStatus.APPROVED,
-            senderName: `Bonus Reward for Completing the ${ordinal(completedUser.totalOrders)} Task`,
+            senderName: rewardDescription,
+            description: rewardDescription,
             creditedAt: new Date(),
             reviewedAt: new Date(),
           },

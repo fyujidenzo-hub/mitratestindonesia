@@ -26,6 +26,7 @@ export default function AdminPage() {
   const { user, logout } = useAuth(); const navigate = useNavigate();
   const { t, language } = useI18n();
   const adminRootRef = useRef<HTMLDivElement>(null);
+  const adminScopeInitializedRef = useRef(false);
   useAdminTextTranslation(adminRootRef, language);
   const [data, setData] = useState<AdminData | null>(null); const [tab, setTab] = useState<Tab>("overview"); const [query, setQuery] = useState(""); const [phoneQuery, setPhoneQuery] = useState(""); const [selectedAdminId, setSelectedAdminId] = useState(""); const [menuOpen, setMenuOpen] = useState(false); const [message, setMessage] = useState(""); const [tone, setTone] = useState<"success" | "error">("success"); const [refreshing, setRefreshing] = useState(false);
   const load = async () => { setRefreshing(true); try { setData(await api<AdminData>("/admin/overview")); } finally { setRefreshing(false); } };
@@ -35,9 +36,10 @@ export default function AdminPage() {
   const perform = async (path: string, body: unknown, success: string, method = "POST") => { try { await api(path, { method, body: JSON.stringify(body) }); say(success); await load(); return true; } catch (error) { say(error instanceof Error ? error.message : "Action failed.", "error"); return false; } };
 
   useEffect(() => {
-    if (user?.role !== "SUPER_ADMIN" || selectedAdminId || !data?.staff.length) return;
+    if (user?.role !== "SUPER_ADMIN" || adminScopeInitializedRef.current || !data?.staff.length) return;
+    adminScopeInitializedRef.current = true;
     setSelectedAdminId(data.staff.some((staffMember) => staffMember.id === user.id) ? user.id : data.staff[0].id);
-  }, [data?.staff, selectedAdminId, user?.id, user?.role]);
+  }, [data?.staff, user?.id, user?.role]);
   useEffect(() => { setPhoneQuery(""); }, [tab]);
 
   const filteredMembers = useMemo(() => data?.members.filter((member) => (!selectedAdminId || member.referrer?.id === selectedAdminId) && `${member.displayName} ${member.username} ${member.phone}`.toLowerCase().includes(query.toLowerCase())) ?? [], [data?.members, query, selectedAdminId]);
@@ -258,16 +260,92 @@ function SystemSettings({ supportUrl, banks, perform }: { supportUrl: string; ba
   return <><BankAccountsPanel banks={banks} perform={perform} /><SupportSettings supportUrl={supportUrl} perform={perform} /></>;
 }
 
-type BankDraft = { bankName: string; accountNumber: string; accountName: string };
-const emptyBankDraft: BankDraft = { bankName: "", accountNumber: "", accountName: "" };
+type BankDraft = {
+  bankName: string;
+  accountNumber: string;
+  accountName: string;
+  minimumDeposit: string;
+  maximumDeposit: string;
+  active: boolean;
+};
+
+const emptyBankDraft: BankDraft = {
+  bankName: "",
+  accountNumber: "",
+  accountName: "",
+  minimumDeposit: "100000",
+  maximumDeposit: "100000000",
+  active: false,
+};
+
+function bankDraftIsValid(bank: BankDraft | null) {
+  if (!bank?.bankName.trim() || bank.accountNumber.trim().length < 4 || !bank.accountName.trim()) return false;
+  const minimum = Number(bank.minimumDeposit);
+  const maximum = Number(bank.maximumDeposit);
+  return Number.isSafeInteger(minimum) && Number.isSafeInteger(maximum) && minimum >= 10_000 && maximum >= minimum;
+}
+
+function BankConfigurationFields({
+  value,
+  onChange,
+  autoFocus = false,
+}: {
+  value: BankDraft;
+  onChange: (value: BankDraft) => void;
+  autoFocus?: boolean;
+}) {
+  const { t } = useI18n();
+  return <div className="grid gap-4">
+    <div className="grid gap-4 sm:grid-cols-2">
+      <Field label={t("Bank name")}>
+        <input autoFocus={autoFocus} required maxLength={80} className={inputClass} value={value.bankName} onChange={(event) => onChange({ ...value, bankName: event.target.value })} placeholder="BCA" />
+      </Field>
+      <Field label={t("Account number")}>
+        <input required minLength={4} maxLength={64} inputMode="numeric" className={inputClass} value={value.accountNumber} onChange={(event) => onChange({ ...value, accountNumber: event.target.value })} placeholder="881044552100" />
+      </Field>
+    </div>
+    <Field label={t("Account holder name")}>
+      <input required maxLength={120} className={inputClass} value={value.accountName} onChange={(event) => onChange({ ...value, accountName: event.target.value })} placeholder="Shopee Work Indonesia" />
+    </Field>
+    <div className="grid gap-4 sm:grid-cols-2">
+      <Field label={t("Minimum top-up amount")} hint={t("Lowest amount customers may submit.")}>
+        <div className="relative">
+          <span className="absolute left-4 top-1/2 -translate-y-1/2 text-sm font-black text-shopee-500">Rp</span>
+          <input required type="number" min={10_000} step={1_000} className={`${inputClass} pl-12`} value={value.minimumDeposit} onChange={(event) => onChange({ ...value, minimumDeposit: event.target.value })} />
+        </div>
+      </Field>
+      <Field label={t("Maximum top-up amount")} hint={t("Highest amount customers may submit.")}>
+        <div className="relative">
+          <span className="absolute left-4 top-1/2 -translate-y-1/2 text-sm font-black text-shopee-500">Rp</span>
+          <input required type="number" min={10_000} step={1_000} className={`${inputClass} pl-12`} value={value.maximumDeposit} onChange={(event) => onChange({ ...value, maximumDeposit: event.target.value })} />
+        </div>
+      </Field>
+    </div>
+    <div>
+      <p className="mb-2 text-sm font-black text-slate-700">{t("Account status")}</p>
+      <div className="grid grid-cols-2 gap-2 rounded-2xl bg-slate-100 p-1.5">
+        <button type="button" onClick={() => onChange({ ...value, active: true })} className={`flex h-11 items-center justify-center gap-2 rounded-xl text-sm font-black transition ${value.active ? "bg-emerald-500 text-white shadow-md shadow-emerald-500/20" : "text-slate-500 hover:bg-white"}`}>
+          <Power size={16} /> {t("Active")}
+        </button>
+        <button type="button" onClick={() => onChange({ ...value, active: false })} className={`flex h-11 items-center justify-center gap-2 rounded-xl text-sm font-black transition ${!value.active ? "bg-slate-900 text-white shadow-md" : "text-slate-500 hover:bg-white"}`}>
+          <Power size={16} /> {t("Inactive")}
+        </button>
+      </div>
+      <p className="mt-2 text-xs font-semibold leading-5 text-slate-400">
+        {value.active ? t("This account will be shown to customers and replace the currently active account.") : t("This account will remain hidden from customers.")}
+      </p>
+    </div>
+  </div>;
+}
 
 function BankAccountsPanel({ banks, perform }: { banks: Bank[]; perform: (path: string, body: unknown, success: string, method?: string) => Promise<boolean> }) {
+  const { t } = useI18n();
   const [draft, setDraft] = useState<BankDraft | null>(null);
   const [editing, setEditing] = useState<(BankDraft & { id: string }) | null>(null);
   const [deleting, setDeleting] = useState<Bank | null>(null);
   const [busy, setBusy] = useState(false);
-  const valid = Boolean(draft?.bankName.trim().length && draft.accountNumber.trim().length >= 4 && draft.accountName.trim().length);
-  const editValid = Boolean(editing?.bankName.trim().length && editing.accountNumber.trim().length >= 4 && editing.accountName.trim().length);
+  const valid = bankDraftIsValid(draft);
+  const editValid = bankDraftIsValid(editing);
 
   const createBank = async () => {
     if (!draft || !valid || busy) return;
@@ -276,7 +354,10 @@ function BankAccountsPanel({ banks, perform }: { banks: Bank[]; perform: (path: 
       bankName: draft.bankName.trim(),
       accountNumber: draft.accountNumber.trim(),
       accountName: draft.accountName.trim(),
-    }, "Bank account added successfully.");
+      minimumDeposit: Number(draft.minimumDeposit),
+      maximumDeposit: Number(draft.maximumDeposit),
+      active: draft.active,
+    }, t("Bank account added successfully."));
     setBusy(false);
     if (succeeded) setDraft(null);
   };
@@ -288,7 +369,10 @@ function BankAccountsPanel({ banks, perform }: { banks: Bank[]; perform: (path: 
       bankName: editing.bankName.trim(),
       accountNumber: editing.accountNumber.trim(),
       accountName: editing.accountName.trim(),
-    }, "Bank account updated successfully.", "PATCH");
+      minimumDeposit: Number(editing.minimumDeposit),
+      maximumDeposit: Number(editing.maximumDeposit),
+      active: editing.active,
+    }, t("Bank account updated successfully."), "PATCH");
     setBusy(false);
     if (succeeded) setEditing(null);
   };
@@ -296,7 +380,7 @@ function BankAccountsPanel({ banks, perform }: { banks: Bank[]; perform: (path: 
   const deleteBank = async () => {
     if (!deleting || busy) return;
     setBusy(true);
-    const succeeded = await perform(`/admin/banks/${deleting.id}`, {}, "Bank account deleted successfully.", "DELETE");
+    const succeeded = await perform(`/admin/banks/${deleting.id}`, {}, t("Bank account deleted successfully."), "DELETE");
     setBusy(false);
     if (succeeded) setDeleting(null);
   };
@@ -304,17 +388,17 @@ function BankAccountsPanel({ banks, perform }: { banks: Bank[]; perform: (path: 
   const activateBank = async (bank: Bank) => {
     if (bank.active || busy) return;
     setBusy(true);
-    await perform(`/admin/banks/${bank.id}/activate`, {}, "Active bank account updated successfully.", "PATCH");
+    await perform(`/admin/banks/${bank.id}/activate`, {}, t("Active bank account updated successfully."), "PATCH");
     setBusy(false);
   };
 
-  return <><Card className="mt-6 overflow-hidden"><div className="flex flex-col gap-4 border-b border-orange-100 bg-gradient-to-r from-orange-50 to-white p-5 sm:flex-row sm:items-center sm:justify-between sm:p-6"><div className="flex items-center gap-4"><span className="grid h-12 w-12 shrink-0 place-items-center rounded-2xl bg-shopee-500 text-white shadow-lg shadow-shopee-500/20"><Banknote size={22} /></span><div><p className="text-[10px] font-black uppercase tracking-[.16em] text-shopee-500">Payment settings</p><h2 className="mt-1 text-xl font-black text-slate-900">Top-up bank accounts</h2><p className="mt-1 text-xs font-semibold text-slate-500">Choose one active account. Only the selected account appears in the customer top-up form.</p></div></div><Button onClick={() => setDraft({ ...emptyBankDraft })}><Plus size={17} /> Add bank account</Button></div>{banks.length ? <div className="grid gap-3 p-4 sm:grid-cols-2 xl:grid-cols-3">{banks.map((bank) => <article key={bank.id} className={`rounded-2xl border p-4 transition ${bank.active ? "border-orange-200 bg-orange-50/70 shadow-md shadow-orange-100" : "border-slate-100 bg-slate-50"}`}><div className="flex items-start justify-between gap-3"><span className={`grid h-10 w-10 shrink-0 place-items-center rounded-xl ${bank.active ? "bg-shopee-500 text-white" : "bg-white text-shopee-500"}`}><WalletCards size={19} /></span><StatusPill status={bank.active ? "ACTIVE" : "INACTIVE"} /></div><p className="mt-4 text-lg font-black text-slate-900">{bank.bankName}</p><p className="mt-1 break-all text-sm font-black tracking-wide text-slate-700">{bank.accountNumber}</p><p className="mt-1 text-xs font-semibold text-slate-400">{bank.accountName}</p><Button variant={bank.active ? "ghost" : "secondary"} className="mt-4 h-9 w-full text-xs" disabled={bank.active || busy} loading={busy && !bank.active} onClick={() => activateBank(bank)}>{bank.active ? <Check size={14} /> : <Power size={14} />}{bank.active ? "Shown to customers" : "Set as active"}</Button><div className="mt-2 grid grid-cols-2 gap-2"><Button variant="secondary" className="h-9 px-3 text-xs" disabled={busy} onClick={() => setEditing({ id: bank.id, bankName: bank.bankName, accountNumber: bank.accountNumber, accountName: bank.accountName })}><Pencil size={14} /> Edit</Button><Button variant="danger" className="h-9 px-3 text-xs" disabled={busy} onClick={() => setDeleting(bank)}><Trash2 size={14} /> Delete</Button></div></article>)}</div> : <div className="grid place-items-center p-10 text-center"><span className="grid h-14 w-14 place-items-center rounded-2xl bg-slate-100 text-slate-400"><Banknote size={25} /></span><p className="mt-4 font-black text-slate-800">No bank accounts configured</p><p className="mt-1 text-xs font-semibold text-slate-400">Add at least one account before customers submit top-ups.</p></div>}</Card>
+  return <><Card className="mt-6 overflow-hidden"><div className="flex flex-col gap-4 border-b border-orange-100 bg-gradient-to-r from-orange-50 to-white p-5 sm:flex-row sm:items-center sm:justify-between sm:p-6"><div className="flex items-center gap-4"><span className="grid h-12 w-12 shrink-0 place-items-center rounded-2xl bg-shopee-500 text-white shadow-lg shadow-shopee-500/20"><Banknote size={22} /></span><div><p className="text-[10px] font-black uppercase tracking-[.16em] text-shopee-500">{t("Payment settings")}</p><h2 className="mt-1 text-xl font-black text-slate-900">{t("Top-up bank accounts")}</h2><p className="mt-1 text-xs font-semibold text-slate-500">{t("Choose one active account. Only the selected account appears in the customer top-up form.")}</p></div></div><Button onClick={() => setDraft({ ...emptyBankDraft, active: !banks.some((bank) => bank.active) })}><Plus size={17} /> {t("Add bank account")}</Button></div>{banks.length ? <div className="grid gap-3 p-4 sm:grid-cols-2 xl:grid-cols-3">{banks.map((bank) => <article key={bank.id} className={`rounded-2xl border p-4 transition ${bank.active ? "border-orange-200 bg-orange-50/70 shadow-md shadow-orange-100" : "border-slate-100 bg-slate-50"}`}><div className="flex items-start justify-between gap-3"><span className={`grid h-10 w-10 shrink-0 place-items-center rounded-xl ${bank.active ? "bg-shopee-500 text-white" : "bg-white text-shopee-500"}`}><WalletCards size={19} /></span><StatusPill status={bank.active ? "ACTIVE" : "INACTIVE"} /></div><p className="mt-4 text-lg font-black text-slate-900">{bank.bankName}</p><p className="mt-1 break-all text-sm font-black tracking-wide text-slate-700">{bank.accountNumber}</p><p className="mt-1 text-xs font-semibold text-slate-400">{bank.accountName}</p><div className="mt-4 grid grid-cols-2 gap-2 rounded-2xl border border-white bg-white/80 p-3"><div><p className="text-[9px] font-black uppercase tracking-wide text-slate-400">{t("Minimum top-up")}</p><p className="mt-1 text-xs font-black text-slate-800">{money(bank.minimumDeposit)}</p></div><div><p className="text-[9px] font-black uppercase tracking-wide text-slate-400">{t("Maximum top-up")}</p><p className="mt-1 text-xs font-black text-slate-800">{money(bank.maximumDeposit)}</p></div></div><Button variant={bank.active ? "ghost" : "secondary"} className="mt-3 h-9 w-full text-xs" disabled={bank.active || busy} loading={busy && !bank.active} onClick={() => activateBank(bank)}>{bank.active ? <Check size={14} /> : <Power size={14} />}{bank.active ? t("Shown to customers") : t("Set as active")}</Button><div className="mt-2 grid grid-cols-2 gap-2"><Button variant="secondary" className="h-9 px-3 text-xs" disabled={busy} onClick={() => setEditing({ id: bank.id, bankName: bank.bankName, accountNumber: bank.accountNumber, accountName: bank.accountName, minimumDeposit: String(bank.minimumDeposit), maximumDeposit: String(bank.maximumDeposit), active: bank.active })}><Pencil size={14} /> {t("Edit")}</Button><Button variant="danger" className="h-9 px-3 text-xs" disabled={busy} onClick={() => setDeleting(bank)}><Trash2 size={14} /> {t("Delete")}</Button></div></article>)}</div> : <div className="grid place-items-center p-10 text-center"><span className="grid h-14 w-14 place-items-center rounded-2xl bg-slate-100 text-slate-400"><Banknote size={25} /></span><p className="mt-4 font-black text-slate-800">{t("No bank accounts configured")}</p><p className="mt-1 text-xs font-semibold text-slate-400">{t("Add at least one account before customers submit top-ups.")}</p></div>}</Card>
 
-    {draft && <Modal title="Add bank account" onClose={() => !busy && setDraft(null)}><form onSubmit={(event) => { event.preventDefault(); createBank(); }}><div className="grid gap-4"><Field label="Bank name"><input autoFocus required maxLength={80} className={inputClass} value={draft.bankName} onChange={(event) => setDraft({ ...draft, bankName: event.target.value })} placeholder="BCA" /></Field><Field label="Account number"><input required minLength={4} maxLength={64} inputMode="numeric" className={inputClass} value={draft.accountNumber} onChange={(event) => setDraft({ ...draft, accountNumber: event.target.value })} placeholder="881044552100" /></Field><Field label="Account holder name"><input required maxLength={120} className={inputClass} value={draft.accountName} onChange={(event) => setDraft({ ...draft, accountName: event.target.value })} placeholder="Shopee Work Indonesia" /></Field></div><div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end"><Button type="button" variant="ghost" disabled={busy} onClick={() => setDraft(null)}>Cancel</Button><Button type="submit" loading={busy} disabled={!valid}><Plus size={16} /> Add bank account</Button></div></form></Modal>}
+    {draft && <Modal title={t("Add bank account")} onClose={() => !busy && setDraft(null)}><form onSubmit={(event) => { event.preventDefault(); createBank(); }}><BankConfigurationFields value={draft} onChange={setDraft} autoFocus /><div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end"><Button type="button" variant="ghost" disabled={busy} onClick={() => setDraft(null)}>{t("Cancel")}</Button><Button type="submit" loading={busy} disabled={!valid}><Plus size={16} /> {t("Add bank account")}</Button></div></form></Modal>}
 
-    {editing && <Modal title="Edit bank account" onClose={() => !busy && setEditing(null)}><form onSubmit={(event) => { event.preventDefault(); updateBank(); }}><div className="grid gap-4"><Field label="Bank name"><input autoFocus required maxLength={80} className={inputClass} value={editing.bankName} onChange={(event) => setEditing({ ...editing, bankName: event.target.value })} /></Field><Field label="Account number"><input required minLength={4} maxLength={64} inputMode="numeric" className={inputClass} value={editing.accountNumber} onChange={(event) => setEditing({ ...editing, accountNumber: event.target.value })} /></Field><Field label="Account holder name"><input required maxLength={120} className={inputClass} value={editing.accountName} onChange={(event) => setEditing({ ...editing, accountName: event.target.value })} /></Field></div><div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end"><Button type="button" variant="ghost" disabled={busy} onClick={() => setEditing(null)}>Cancel</Button><Button type="submit" loading={busy} disabled={!editValid}><Check size={16} /> Save changes</Button></div></form></Modal>}
+    {editing && <Modal title={t("Edit bank account")} onClose={() => !busy && setEditing(null)}><form onSubmit={(event) => { event.preventDefault(); updateBank(); }}><BankConfigurationFields value={editing} onChange={(value) => setEditing({ ...value, id: editing.id })} autoFocus /><div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end"><Button type="button" variant="ghost" disabled={busy} onClick={() => setEditing(null)}>{t("Cancel")}</Button><Button type="submit" loading={busy} disabled={!editValid}><Check size={16} /> {t("Save changes")}</Button></div></form></Modal>}
 
-    {deleting && <Modal title="Delete bank account?" onClose={() => !busy && setDeleting(null)}><div className="flex gap-4 rounded-3xl border border-rose-200 bg-rose-50 p-4"><span className="grid h-12 w-12 shrink-0 place-items-center rounded-2xl bg-white text-rose-600"><AlertTriangle size={23} /></span><div><p className="font-black text-rose-900">{deleting.bankName} · {deleting.accountNumber}</p><p className="mt-1 text-sm font-semibold leading-6 text-rose-700">This account will immediately disappear from the customer top-up form. Existing transaction records will remain intact.</p></div></div><div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end"><Button variant="ghost" disabled={busy} onClick={() => setDeleting(null)}>Cancel</Button><Button variant="danger" loading={busy} onClick={deleteBank}><Trash2 size={17} /> Confirm deletion</Button></div></Modal>}
+    {deleting && <Modal title={t("Delete bank account?")} onClose={() => !busy && setDeleting(null)}><div className="flex gap-4 rounded-3xl border border-rose-200 bg-rose-50 p-4"><span className="grid h-12 w-12 shrink-0 place-items-center rounded-2xl bg-white text-rose-600"><AlertTriangle size={23} /></span><div><p className="font-black text-rose-900">{deleting.bankName} · {deleting.accountNumber}</p><p className="mt-1 text-sm font-semibold leading-6 text-rose-700">{t("This account will immediately disappear from the customer top-up form. Existing transaction records will remain intact.")}</p></div></div><div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end"><Button variant="ghost" disabled={busy} onClick={() => setDeleting(null)}>{t("Cancel")}</Button><Button variant="danger" loading={busy} onClick={deleteBank}><Trash2 size={17} /> {t("Confirm deletion")}</Button></div></Modal>}
   </>;
 }
 
@@ -335,9 +419,9 @@ function SupportSettings({ supportUrl, perform }: { supportUrl: string; perform:
 }
 
 const adminTablePageSizes = [10, 15, 25, 50, 100] as const;
-const tableScrollClass = "max-h-[68dvh] overflow-auto overscroll-contain [scrollbar-gutter:stable]";
-const tableHeadClass = "sticky top-0 z-20 whitespace-nowrap border-b border-slate-200 bg-slate-50 px-4 py-3 text-left text-[10px] font-black uppercase tracking-[.08em] text-slate-500";
-const tableCellClass = "border-b border-slate-100 px-4 py-3.5 align-middle text-xs font-semibold text-slate-600";
+const tableScrollClass = "max-h-[68dvh] overflow-auto overscroll-contain [scrollbar-gutter:stable] max-md:[&_button]:h-8 max-md:[&_button]:px-2 max-md:[&_button]:text-[11px]";
+const tableHeadClass = "sticky top-0 z-20 whitespace-nowrap border-b border-slate-200 bg-slate-50 px-2.5 py-2 text-left text-[9px] font-black uppercase tracking-[.06em] text-slate-500 sm:px-4 sm:py-3 sm:text-[10px] sm:tracking-[.08em]";
+const tableCellClass = "border-b border-slate-100 px-2.5 py-2 align-middle text-[11px] font-semibold leading-tight text-slate-600 max-md:[&>p:first-child]:max-w-40 max-md:[&>p:first-child]:truncate max-md:[&>p:nth-child(n+2)]:hidden sm:px-4 sm:py-3.5 sm:text-xs sm:leading-normal";
 const activeOrderStatuses = ["WAITING_ASSIGNMENT", "PRODUCT_ASSIGNED", "WAITING_SHIPMENT", "PENDING_DELIVERY"];
 const assignedTaskStatuses: Order["status"][] = ["PRODUCT_ASSIGNED", "WAITING_SHIPMENT", "PENDING_DELIVERY"];
 
@@ -380,7 +464,7 @@ function TablePaginationControls({ pagination }: {
   pagination: ReturnType<typeof useTablePagination<unknown>>;
 }) {
   const { t } = useI18n();
-  return <div className="flex flex-col gap-3 border-t border-slate-100 bg-white px-3 py-3 sm:flex-row sm:items-center sm:justify-between sm:px-4">
+  return <div className="flex flex-col gap-2 border-t border-slate-100 bg-white px-2.5 py-2.5 sm:flex-row sm:items-center sm:justify-between sm:gap-3 sm:px-4 sm:py-3">
     <div className="flex items-center justify-between gap-3 sm:justify-start">
       <label className="flex items-center gap-2 text-[11px] font-black text-slate-500">
         <span>{t("Rows")}</span>
@@ -388,7 +472,7 @@ function TablePaginationControls({ pagination }: {
           aria-label="Rows per page"
           value={pagination.pageSize}
           onChange={(event) => pagination.setPageSize(Number(event.target.value))}
-          className="h-9 rounded-xl border border-slate-200 bg-slate-50 px-3 text-xs font-black text-slate-700 outline-none focus:border-shopee-300"
+          className="h-8 rounded-xl border border-slate-200 bg-slate-50 px-2.5 text-[11px] font-black text-slate-700 outline-none focus:border-shopee-300 sm:h-9 sm:px-3 sm:text-xs"
         >
           {adminTablePageSizes.map((size) => <option key={size} value={size}>{size}</option>)}
         </select>
@@ -401,7 +485,7 @@ function TablePaginationControls({ pagination }: {
       <Button
         type="button"
         variant="ghost"
-        className="h-9 flex-1 px-3 text-xs sm:flex-none"
+        className="h-8 flex-1 px-2 text-[11px] sm:h-9 sm:flex-none sm:px-3 sm:text-xs"
         disabled={pagination.currentPage === 1}
         onClick={() => pagination.setPage((value) => Math.max(1, value - 1))}
       >
@@ -413,7 +497,7 @@ function TablePaginationControls({ pagination }: {
       <Button
         type="button"
         variant="ghost"
-        className="h-9 flex-1 px-3 text-xs sm:flex-none"
+        className="h-8 flex-1 px-2 text-[11px] sm:h-9 sm:flex-none sm:px-3 sm:text-xs"
         disabled={pagination.currentPage === pagination.pageCount}
         onClick={() => pagination.setPage((value) => Math.min(pagination.pageCount, value + 1))}
       >
@@ -445,6 +529,12 @@ function orderTaskStage(status: Order["status"]) {
   if (status === "WAITING_SHIPMENT" || status === "PENDING_DELIVERY") return "Order shipped";
   if (status === "DELIVERED") return "Completed";
   return "Rejected";
+}
+
+function orderTaskProgressKey(status: Order["status"]) {
+  if (status === "DELIVERED") return "Order task {sequence} completed ({sequence}/15)";
+  if (status === "REJECTED") return "Order task {sequence} rejected ({sequence}/15)";
+  return "Order task {sequence} not yet completed ({sequence}/15)";
 }
 
 function MemberPresenceBadge({ online }: { online: boolean }) {
@@ -493,8 +583,9 @@ function PhoneSearchBox({ id, value, onChange }: { id: string; value: string; on
 }
 
 function Members({ members, orders, adminFilterId, scopePanel, canManage, canManageSecurity, canManageWithdrawals, perform }: { members: User[]; orders: Order[]; adminFilterId: string; scopePanel?: React.ReactNode; canManage: boolean; canManageSecurity: boolean; canManageWithdrawals: boolean; perform: (path: string, body: unknown, success: string, method?: string) => Promise<boolean> }) {
+  const { t } = useI18n();
   const [viewing, setViewing] = useState<User | null>(null);
-  const [reward, setReward] = useState<{ user: User; amount: string } | null>(null);
+  const [reward, setReward] = useState<{ user: User; amount: string; description: string } | null>(null);
   const [access, setAccess] = useState<{ user: User; level: UserLevel; active: boolean; withdrawalLocked?: boolean; accountPassword?: string; withdrawalPassword?: string; remarks?: string } | null>(null);
   const [busy, setBusy] = useState(false);
   const [phoneQuery, setPhoneQuery] = useState("");
@@ -582,7 +673,7 @@ function Members({ members, orders, adminFilterId, scopePanel, canManage, canMan
 
   return <><Card className="mt-6 overflow-hidden"><div className="flex flex-col gap-2 border-b border-slate-100 p-4 sm:flex-row sm:items-center sm:justify-between"><div><p className="font-black text-slate-900">Member directory</p><p className="mt-1 text-xs font-semibold text-slate-400">{displayedMembers.length} accounts · Promo ownership, balances, membership, and access activity</p></div><span className="w-fit rounded-full bg-slate-100 px-3 py-1.5 text-[10px] font-black uppercase tracking-wide text-slate-500">{canManage ? "Super Admin controls" : canManageSecurity ? "Admin member controls" : "Admin monitoring"}</span></div>{scopePanel}<div className="border-b border-slate-100 bg-slate-50/60 p-4"><label htmlFor="member-phone-search" className="text-xs font-black uppercase tracking-wide text-slate-600">Search by phone number</label><div className="relative mt-2 max-w-xl"><Search size={17} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" /><input id="member-phone-search" type="tel" inputMode="tel" autoComplete="off" value={phoneQuery} onChange={(event) => setPhoneQuery(event.target.value)} className={`${inputClass} pl-10 ${phoneQuery ? "pr-11" : ""}`} placeholder="Enter a member phone number" />{phoneQuery && <button type="button" aria-label="Clear phone search" onClick={() => setPhoneQuery("")} className="absolute right-2.5 top-1/2 grid h-8 w-8 -translate-y-1/2 place-items-center rounded-lg text-slate-400 transition hover:bg-white hover:text-slate-700"><X size={16} /></button>}</div><div className="mt-2 min-h-4 text-xs font-semibold">{phoneSearchLoading ? <span className="text-shopee-500">Searching members…</span> : phoneSearchError ? <span className="text-rose-600">{phoneSearchError}</span> : phoneQuery.trim() ? <span className="text-slate-400">{displayedMembers.length ? "Matching accounts are shown below." : "No account found for this phone number."}</span> : <span className="text-slate-400">Results update automatically while you type.</span>}</div></div><div className="grid max-h-[68dvh] gap-3 overflow-y-auto overscroll-contain p-3 md:hidden">{memberPagination.pageItems.map((member) => { const shortfall = shortfallForMember(member, orders); const online = onlineMemberIds.has(member.id); return <MobileRecordCard key={member.id} title={member.displayName} subtitle={`@${member.username} · ${member.phone || "No phone"}`} badge={<MemberPresenceBadge online={online} />} actions={<><Button variant="ghost" className="h-9 flex-1 px-3 text-xs" onClick={() => setViewing(member)}><Eye size={14} /> View</Button>{canManageSecurity && <Button variant="secondary" className="h-9 flex-1 px-3 text-xs" onClick={() => setAccess({ user: member, level: member.level, active: member.isActive !== false })}><UserCog size={14} /> Manage</Button>}</>}><MobileRecordField label="Promo code">{member.referrer?.invitationCode || "—"}</MobileRecordField><MobileRecordField label="Admin code">{member.referrer?.adminCode || "—"}</MobileRecordField><MobileRecordField label="Administrator">{member.referrer?.displayName || "Not linked"}</MobileRecordField><MobileRecordField label="Shortfall"><span className={shortfall > 0 ? "text-rose-600" : "text-emerald-600"}>{money(shortfall)}</span></MobileRecordField><MobileRecordField label="Orders">{member.totalOrders}</MobileRecordField><MobileRecordField label="Level">{membershipLabel(member.level)}</MobileRecordField><MobileRecordField label="Account access">{member.isActive === false ? "Disabled" : "Enabled"}</MobileRecordField><MobileRecordField label="Active session"><MemberPresenceBadge online={online} /></MobileRecordField><MobileRecordField label="Last login">{member.lastLoginAt ? dateTime(member.lastLoginAt) : "Never"}</MobileRecordField></MobileRecordCard>; })}{!displayedMembers.length && <p className="py-8 text-center text-sm font-bold text-slate-400">No members match the current search.</p>}</div><div className={`${tableScrollClass} hidden md:block`}><table className="w-full min-w-[1450px]"><caption className="sr-only">Member account management</caption><thead><tr><th className={tableHeadClass}>Promo Code</th><th className={tableHeadClass}>Admin Code</th><th className={tableHeadClass}>User</th><th className={tableHeadClass}>Name / Account</th><th className={tableHeadClass}>Shortfall</th><th className={tableHeadClass}>Orders</th><th className={tableHeadClass}>Level</th><th className={tableHeadClass}>Active Session</th><th className={tableHeadClass}>Last Login</th><th className={`${tableHeadClass} right-0 !z-30 shadow-[-8px_0_16px_-16px_rgba(15,23,42,.7)]`}>Action</th></tr></thead><tbody>{memberPagination.pageItems.map((member) => { const shortfall = shortfallForMember(member, orders); return <tr key={member.id} className="group bg-white transition hover:bg-orange-50/30"><td className={tableCellClass}><span className="rounded-lg bg-shopee-50 px-2.5 py-1.5 font-black text-shopee-600">{member.referrer?.invitationCode || "—"}</span></td><td className={tableCellClass}><span className="font-black text-slate-900">{member.referrer?.adminCode || "—"}</span></td><td className={tableCellClass}><p className="font-black text-slate-900">@{member.username}</p><p className="mt-1 text-[10px] text-slate-400">{member.isActive === false ? "Account disabled" : "Account enabled"}</p></td><td className={tableCellClass}><p className="font-black text-black">{member.displayName}</p><p className="mt-1 text-xs font-black text-black">{member.phone || "No phone"}</p><p className="mt-1 text-[10px] font-semibold text-slate-400">{member.referrer?.displayName || "No administrator"}</p></td><td className={tableCellClass}><span className={`font-black ${shortfall > 0 ? "text-rose-600" : "text-emerald-600"}`}>{money(shortfall)}</span></td><td className={tableCellClass}><span className="font-black text-slate-900">{member.totalOrders}</span></td><td className={tableCellClass}><span className="rounded-full bg-violet-50 px-2.5 py-1 font-black text-violet-700">{membershipLabel(member.level)}</span></td><td className={tableCellClass}><MemberPresenceBadge online={onlineMemberIds.has(member.id)} /></td><td className={tableCellClass}>{member.lastLoginAt ? dateTime(member.lastLoginAt) : <span className="text-slate-400">Never</span>}</td><td className={`${tableCellClass} sticky right-0 bg-white shadow-[-8px_0_16px_-16px_rgba(15,23,42,.7)] group-hover:bg-orange-50/30`}><div className="flex justify-end gap-2"><Button variant="ghost" className="h-9 px-3 text-xs" onClick={() => setViewing(member)}><Eye size={14} /> View</Button>{canManageSecurity && <Button variant="secondary" className="h-9 px-3 text-xs" onClick={() => setAccess({ user: member, level: member.level, active: member.isActive !== false })}><UserCog size={14} /> Manage</Button>}</div></td></tr>; })}{!displayedMembers.length && <tr><td colSpan={10} className="px-6 py-12 text-center text-sm font-bold text-slate-400">No members match the current search.</td></tr>}</tbody></table></div><TablePaginationControls pagination={memberPagination} /></Card>
 
-    {viewing && <Modal title="Member account details" onClose={() => setViewing(null)} wide><div className="flex flex-col gap-4 rounded-3xl bg-slate-950 p-4 text-white sm:flex-row sm:items-center sm:p-5"><span className="grid h-12 w-12 shrink-0 place-items-center rounded-2xl bg-white/10 font-black sm:h-14 sm:w-14">{viewing.displayName.slice(0, 2).toUpperCase()}</span><div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-2"><h3 className="break-words text-lg font-black sm:text-xl">{viewing.displayName}</h3><MemberPresenceBadge online={onlineMemberIds.has(viewing.id)} /></div><p className="mt-1 break-all text-sm font-semibold text-slate-300">@{viewing.username} · {membershipLabel(viewing.level)}</p></div></div><div className="mt-4 grid gap-2.5 sm:mt-5 sm:grid-cols-2 sm:gap-3"><StaffDetail label="Promo code" value={viewing.referrer?.invitationCode || "Not linked"} /><StaffDetail label="Admin code" value={viewing.referrer?.adminCode || "Not linked"} /><StaffDetail label="Administrator" value={viewing.referrer?.displayName || "Not linked"} /><StaffDetail label="Phone number" value={viewing.phone || "Not provided"} /><StaffDetail label="Account balance" value={money(viewing.balance)} /><StaffDetail label="Account access" value={viewing.isActive === false ? "Disabled" : "Enabled"} /><StaffDetail label="Active session" value={<MemberPresenceBadge online={onlineMemberIds.has(viewing.id)} />} /><StaffDetail label="Orders" value={String(viewing.totalOrders)} /><StaffDetail label="Balance shortfall" value={money(shortfallForMember(viewing, orders))} /><StaffDetail label="Last login" value={viewing.lastLoginAt ? dateTime(viewing.lastLoginAt) : "Never"} /><StaffDetail label="Withdrawal access" value={viewing.withdrawalLocked ? "Closed" : "Open"} /></div><div className="mt-5 flex flex-col-reverse gap-2 sm:mt-6 sm:flex-row sm:flex-wrap sm:justify-end"><Button variant="ghost" onClick={() => setViewing(null)}>Close</Button>{canManageWithdrawals && <Button variant={viewing.withdrawalLocked ? "secondary" : "danger"} onClick={async () => { const member = viewing; const succeeded = await perform(`/admin/members/${member.id}/withdrawal-lock`, { locked: !member.withdrawalLocked, remarks: !member.withdrawalLocked ? "Withdrawals closed by an administrator." : "" }, member.withdrawalLocked ? "Member withdrawals opened." : "Member withdrawals closed.", "PATCH"); if (succeeded) setViewing(null); }}><LockKeyhole size={16} /> {viewing.withdrawalLocked ? "Open withdrawals" : "Close withdrawals"}</Button>}{canManage && <><Button variant="secondary" onClick={() => { setReward({ user: viewing, amount: "50000" }); setViewing(null); }}><BadgeDollarSign size={16} /> Add bonus</Button><Button onClick={() => { setAccess({ user: viewing, level: viewing.level, active: viewing.isActive !== false }); setViewing(null); }}><UserCog size={16} /> Manage access</Button></>}</div></Modal>}
+    {viewing && <Modal title="Member account details" onClose={() => setViewing(null)} wide><div className="flex flex-col gap-4 rounded-3xl bg-slate-950 p-4 text-white sm:flex-row sm:items-center sm:p-5"><span className="grid h-12 w-12 shrink-0 place-items-center rounded-2xl bg-white/10 font-black sm:h-14 sm:w-14">{viewing.displayName.slice(0, 2).toUpperCase()}</span><div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-2"><h3 className="break-words text-lg font-black sm:text-xl">{viewing.displayName}</h3><MemberPresenceBadge online={onlineMemberIds.has(viewing.id)} /></div><p className="mt-1 break-all text-sm font-semibold text-slate-300">@{viewing.username} · {membershipLabel(viewing.level)}</p></div></div><div className="mt-4 grid gap-2.5 sm:mt-5 sm:grid-cols-2 sm:gap-3"><StaffDetail label="Promo code" value={viewing.referrer?.invitationCode || "Not linked"} /><StaffDetail label="Admin code" value={viewing.referrer?.adminCode || "Not linked"} /><StaffDetail label="Administrator" value={viewing.referrer?.displayName || "Not linked"} /><StaffDetail label="Phone number" value={viewing.phone || "Not provided"} /><StaffDetail label="Account balance" value={money(viewing.balance)} /><StaffDetail label="Account access" value={viewing.isActive === false ? "Disabled" : "Enabled"} /><StaffDetail label="Active session" value={<MemberPresenceBadge online={onlineMemberIds.has(viewing.id)} />} /><StaffDetail label="Orders" value={String(viewing.totalOrders)} /><StaffDetail label="Balance shortfall" value={money(shortfallForMember(viewing, orders))} /><StaffDetail label="Last login" value={viewing.lastLoginAt ? dateTime(viewing.lastLoginAt) : "Never"} /><StaffDetail label="Withdrawal access" value={viewing.withdrawalLocked ? "Closed" : "Open"} /></div><div className="mt-5 flex flex-col-reverse gap-2 sm:mt-6 sm:flex-row sm:flex-wrap sm:justify-end"><Button variant="ghost" onClick={() => setViewing(null)}>Close</Button>{canManageWithdrawals && <Button variant={viewing.withdrawalLocked ? "secondary" : "danger"} onClick={async () => { const member = viewing; const succeeded = await perform(`/admin/members/${member.id}/withdrawal-lock`, { locked: !member.withdrawalLocked, remarks: !member.withdrawalLocked ? "Withdrawals closed by an administrator." : "" }, member.withdrawalLocked ? "Member withdrawals opened." : "Member withdrawals closed.", "PATCH"); if (succeeded) setViewing(null); }}><LockKeyhole size={16} /> {viewing.withdrawalLocked ? "Open withdrawals" : "Close withdrawals"}</Button>}{canManage && <><Button variant="secondary" onClick={() => { setReward({ user: viewing, amount: "50000", description: "" }); setViewing(null); }}><BadgeDollarSign size={16} /> {t("Add balance")}</Button><Button onClick={() => { setAccess({ user: viewing, level: viewing.level, active: viewing.isActive !== false }); setViewing(null); }}><UserCog size={16} /> Manage access</Button></>}</div></Modal>}
 
     {access && <Modal title="Manage member" onClose={() => !busy && setAccess(null)} wide>
       <div className="rounded-2xl bg-slate-950 p-4 text-white">
@@ -612,19 +703,43 @@ function Members({ members, orders, adminFilterId, scopePanel, canManage, canMan
       <div className="mt-6 flex flex-col-reverse gap-3 sm:flex-row sm:justify-end"><Button variant="ghost" disabled={busy} onClick={() => setAccess(null)}>Cancel</Button><Button loading={busy} disabled={!accessFormValid} onClick={saveAccess}><Check size={16} /> Save member settings</Button></div>
     </Modal>}
 
-    {reward && <Modal title={`Add a bonus for ${reward.user.displayName}`} onClose={() => !busy && setReward(null)}><Field label="Bonus amount"><input className={inputClass} type="number" min="1" value={reward.amount} onChange={(event) => setReward({ ...reward, amount: event.target.value })} /></Field><Button loading={busy} className="mt-4 w-full" onClick={async () => { setBusy(true); const succeeded = await perform(`/admin/members/${reward.user.id}/reward`, { amount: Number(reward.amount), note: "Super Admin Bonus" }, "Bonus added successfully."); setBusy(false); if (succeeded) setReward(null); }}>Add bonus</Button></Modal>}
+    {reward && <Modal title={t("Add balance for {name}", { name: reward.user.displayName })} onClose={() => !busy && setReward(null)}>
+      <form onSubmit={async (event) => {
+        event.preventDefault();
+        if (!reward.description.trim()) return;
+        setBusy(true);
+        const succeeded = await perform(
+          `/admin/members/${reward.user.id}/reward`,
+          { amount: Number(reward.amount), description: reward.description.trim() },
+          t("Balance added successfully."),
+        );
+        setBusy(false);
+        if (succeeded) setReward(null);
+      }}>
+        <div className="grid gap-4">
+          <Field label={t("Balance amount")}>
+            <input className={inputClass} type="number" min="1" max="100000000" required value={reward.amount} onChange={(event) => setReward({ ...reward, amount: event.target.value })} />
+          </Field>
+          <Field label={t("Description / note")} hint={t("Required. This text will appear in the member's transaction history.")}>
+            <textarea className={`${inputClass} h-auto resize-y py-3`} rows={4} maxLength={500} required value={reward.description} onChange={(event) => setReward({ ...reward, description: event.target.value })} placeholder={t("Enter the balance addition description")} />
+          </Field>
+        </div>
+        <Button loading={busy} disabled={!reward.description.trim() || Number(reward.amount) <= 0} className="mt-5 w-full" type="submit">{t("Submit balance addition")}</Button>
+      </form>
+    </Modal>}
   </>;
 }
 
 function Tasks({ orders, products, phoneQuery, onPhoneQueryChange, scopePanel, perform }: { orders: Order[]; products: Product[]; phoneQuery: string; onPhoneQueryChange: (value: string) => void; scopePanel?: React.ReactNode; perform: (path: string, body: unknown, success: string) => Promise<boolean> }) {
+  const { t } = useI18n();
   const [viewing, setViewing] = useState<Order | null>(null);
   const [target, setTarget] = useState<Order | null>(null);
   const orderPagination = useTablePagination(orders);
   const beginAssignment = (order: Order) => { setViewing(null); setTarget(order); };
 
-  return <><Card className="mt-6 overflow-hidden"><div className="border-b border-slate-100 p-4"><p className="font-black text-slate-900">Order and task monitoring</p><p className="mt-1 text-xs font-semibold text-slate-400">Assignment, customer balance exposure, task progress, and commission records</p></div>{scopePanel}<PhoneSearchBox id="order-phone-search" value={phoneQuery} onChange={onPhoneQueryChange} /><div className={tableScrollClass}><table className="w-full min-w-[1950px]"><caption className="sr-only">Order and task management</caption><thead><tr>{["Order Code", "Admin Code", "User Phone", "Name", "User Balance", "Product", "Total Price", "Commission", "Balance Shortfall", "Status", "Task", "Date"].map((label) => <th key={label} className={tableHeadClass}>{label}</th>)}<th className={`${tableHeadClass} right-0 !z-30 shadow-[-8px_0_16px_-16px_rgba(15,23,42,.7)]`}>Action</th></tr></thead><tbody>{orderPagination.pageItems.map((order) => { const userBalance = order.user?.balance ?? 0; const shortfall = Math.max(0, order.requiredBalance - userBalance); const assignable = order.status === "WAITING_ASSIGNMENT" && !memberHasActiveAssignedTask(orders, order); const adminCode = order.admin?.adminCode || order.user?.referrer?.adminCode || "—"; return <tr key={order.id} className="group bg-white transition hover:bg-orange-50/30"><td className={tableCellClass}><p className="max-w-44 break-all font-black text-slate-900">{order.referenceNumber}</p></td><td className={tableCellClass}><span className="font-black text-shopee-600">{adminCode}</span></td><td className={tableCellClass}><p className="font-black text-slate-900">{order.user?.phone || "No phone"}</p><p className="mt-1 text-[10px] font-semibold text-slate-400">@{order.user?.username || "—"}</p></td><td className={tableCellClass}><span className="font-black text-slate-900">{order.user?.displayName || "Unknown"}</span></td><td className={tableCellClass}><span className="font-black text-shopee-600">{money(userBalance)}</span></td><td className={tableCellClass}><p className="max-w-64 font-bold text-slate-800">{order.items.map((item) => item.productName).join(", ") || "Awaiting assignment"}</p></td><td className={tableCellClass}><span className="font-black text-slate-900">{money(order.totalValue)}</span></td><td className={tableCellClass}><span className="font-black text-emerald-600">{money(order.commission)}</span></td><td className={tableCellClass}><span className={`font-black ${shortfall > 0 ? "text-rose-600" : "text-emerald-600"}`}>{money(shortfall)}</span></td><td className={tableCellClass}><StatusPill status={order.status} /></td><td className={tableCellClass}><p className="max-w-52 font-black text-slate-900">{orderTaskStage(order.status)}</p><p className="mt-1 max-w-52 truncate text-[10px] font-semibold text-slate-400">{order.items[0]?.productName || "No product assigned"}</p>{order.requiresCustomerApproval && <p className="mt-1 text-[10px] font-black text-amber-600">Approval required</p>}</td><td className={tableCellClass}>{dateTime(order.createdAt)}</td><td className={`${tableCellClass} sticky right-0 bg-white shadow-[-8px_0_16px_-16px_rgba(15,23,42,.7)] group-hover:bg-orange-50/30`}><div className="flex justify-end gap-2"><Button variant="ghost" className="h-9 px-3 text-xs" onClick={() => setViewing(order)}><Eye size={14} /> View</Button>{assignable && <Button className="h-9 px-3 text-xs" onClick={() => beginAssignment(order)}><ClipboardList size={14} /> Assign</Button>}</div></td></tr>; })}{!orders.length && <tr><td colSpan={13} className="px-6 py-12 text-center text-sm font-bold text-slate-400">No orders match the current search.</td></tr>}</tbody></table></div><TablePaginationControls pagination={orderPagination} /></Card>
+  return <><Card className="mt-6 overflow-hidden"><div className="border-b border-slate-100 p-4"><p className="font-black text-slate-900">Order and task monitoring</p><p className="mt-1 text-xs font-semibold text-slate-400">Assignment, customer balance exposure, task progress, and commission records</p></div>{scopePanel}<PhoneSearchBox id="order-phone-search" value={phoneQuery} onChange={onPhoneQueryChange} /><div className={tableScrollClass}><table className="w-full min-w-[1950px]"><caption className="sr-only">Order and task management</caption><thead><tr>{["Order Code", "Admin Code", "User Phone", "Name", "User Balance", "Product", "Total Price", "Commission", "Balance Shortfall", "Status", "Task", "Date"].map((label) => <th key={label} className={tableHeadClass}>{label}</th>)}<th className={`${tableHeadClass} right-0 !z-30 shadow-[-8px_0_16px_-16px_rgba(15,23,42,.7)]`}>Action</th></tr></thead><tbody>{orderPagination.pageItems.map((order) => { const userBalance = order.user?.balance ?? 0; const shortfall = Math.max(0, order.requiredBalance - userBalance); const assignable = order.status === "WAITING_ASSIGNMENT" && !memberHasActiveAssignedTask(orders, order); const adminCode = order.admin?.adminCode || order.user?.referrer?.adminCode || "—"; const taskSequence = Math.max(1, order.taskSequence ?? 1); return <tr key={order.id} className="group bg-white transition hover:bg-orange-50/30"><td className={tableCellClass}><p className="max-w-44 break-all font-black text-slate-900">{order.referenceNumber}</p></td><td className={tableCellClass}><span className="font-black text-shopee-600">{adminCode}</span></td><td className={tableCellClass}><p className="font-black text-slate-900">{order.user?.phone || "No phone"}</p><p className="mt-1 text-[10px] font-semibold text-slate-400">@{order.user?.username || "—"}</p></td><td className={tableCellClass}><span className="font-black text-slate-900">{order.user?.displayName || "Unknown"}</span></td><td className={tableCellClass}><span className="font-black text-shopee-600">{money(userBalance)}</span></td><td className={tableCellClass}><p className="max-w-64 font-bold text-slate-800">{order.items.map((item) => item.productName).join(", ") || "Awaiting assignment"}</p></td><td className={tableCellClass}><span className="font-black text-slate-900">{money(order.totalValue)}</span></td><td className={tableCellClass}><span className="font-black text-emerald-600">{money(order.commission)}</span></td><td className={tableCellClass}><span className={`font-black ${shortfall > 0 ? "text-rose-600" : "text-emerald-600"}`}>{money(shortfall)}</span></td><td className={tableCellClass}><StatusPill status={order.status} /></td><td className={tableCellClass}><p className="max-w-64 font-black text-slate-900">{t(orderTaskProgressKey(order.status), { sequence: taskSequence })}</p><p className="mt-1 max-w-64 text-[10px] font-bold text-shopee-600">{orderTaskStage(order.status)}</p><p className="mt-1 max-w-64 truncate text-[10px] font-semibold text-slate-400">{order.items[0]?.productName || "No product assigned"}</p>{order.requiresCustomerApproval && <p className="mt-1 text-[10px] font-black text-amber-600">Approval required</p>}</td><td className={tableCellClass}>{dateTime(order.createdAt)}</td><td className={`${tableCellClass} sticky right-0 bg-white shadow-[-8px_0_16px_-16px_rgba(15,23,42,.7)] group-hover:bg-orange-50/30`}><div className="flex justify-end gap-2"><Button variant="ghost" className="h-9 px-3 text-xs" onClick={() => setViewing(order)}><Eye size={14} /> View</Button>{assignable && <Button className="h-9 px-3 text-xs" onClick={() => beginAssignment(order)}><ClipboardList size={14} /> Assign</Button>}</div></td></tr>; })}{!orders.length && <tr><td colSpan={13} className="px-6 py-12 text-center text-sm font-bold text-slate-400">No orders match the current search.</td></tr>}</tbody></table></div><TablePaginationControls pagination={orderPagination} /></Card>
 
-    {viewing && <Modal title="Order and task details" onClose={() => setViewing(null)} wide><div className="flex flex-wrap items-start justify-between gap-3 rounded-3xl bg-slate-950 p-5 text-white"><div><p className="text-[10px] font-black uppercase tracking-wide text-slate-400">Order code</p><p className="mt-1 break-all text-lg font-black">{viewing.referenceNumber}</p><p className="mt-2 text-sm font-semibold text-slate-300">{viewing.user?.displayName} · @{viewing.user?.username}</p></div><StatusPill status={viewing.status} /></div><div className="mt-5 grid gap-3 sm:grid-cols-2"><StaffDetail label="Admin code" value={viewing.admin?.adminCode || viewing.user?.referrer?.adminCode || "Not linked"} /><StaffDetail label="Administrator" value={viewing.admin?.displayName || viewing.user?.referrer?.displayName || "Not linked"} /><StaffDetail label="User balance" value={money(viewing.user?.balance ?? 0)} /><StaffDetail label="Balance shortfall" value={money(Math.max(0, viewing.requiredBalance - (viewing.user?.balance ?? 0)))} /><StaffDetail label="Total price" value={money(viewing.totalValue)} /><StaffDetail label="Commission" value={money(viewing.commission)} /><StaffDetail label="Created" value={dateTime(viewing.createdAt)} /><StaffDetail label="Customer approval" value={viewing.requiresCustomerApproval ? "Required" : "Not required"} /></div><div className="mt-5 rounded-2xl border border-slate-100"><p className="border-b border-slate-100 px-4 py-3 text-xs font-black uppercase text-slate-500">Products</p>{viewing.items.length ? viewing.items.map((item) => <div key={item.id} className="flex items-center justify-between gap-4 border-b border-slate-100 px-4 py-3 last:border-0"><div><p className="text-sm font-black text-slate-900">{item.productName}</p><p className="mt-1 text-xs font-semibold text-slate-400">{item.productCode} · Qty {item.quantity}</p></div><p className="text-sm font-black text-slate-900">{money(item.total)}</p></div>) : <p className="p-4 text-sm font-semibold text-slate-400">No product assigned yet.</p>}</div><div className="mt-6 flex justify-end gap-3"><Button variant="ghost" onClick={() => setViewing(null)}>Close</Button>{viewing.status === "WAITING_ASSIGNMENT" && !memberHasActiveAssignedTask(orders, viewing) && <Button onClick={() => beginAssignment(viewing)}><ClipboardList size={16} /> Assign product</Button>}</div></Modal>}
+    {viewing && <Modal title="Order and task details" onClose={() => setViewing(null)} wide><div className="flex flex-wrap items-start justify-between gap-3 rounded-3xl bg-slate-950 p-5 text-white"><div><p className="text-[10px] font-black uppercase tracking-wide text-slate-400">Order code</p><p className="mt-1 break-all text-lg font-black">{viewing.referenceNumber}</p><p className="mt-2 text-sm font-semibold text-slate-300">{viewing.user?.displayName} · @{viewing.user?.username}</p></div><StatusPill status={viewing.status} /></div><div className="mt-5 grid gap-3 sm:grid-cols-2"><StaffDetail label="Admin code" value={viewing.admin?.adminCode || viewing.user?.referrer?.adminCode || "Not linked"} /><StaffDetail label="Administrator" value={viewing.admin?.displayName || viewing.user?.referrer?.displayName || "Not linked"} /><StaffDetail label="Task sequence" value={t(orderTaskProgressKey(viewing.status), { sequence: Math.max(1, viewing.taskSequence ?? 1) })} /><StaffDetail label="User balance" value={money(viewing.user?.balance ?? 0)} /><StaffDetail label="Balance shortfall" value={money(Math.max(0, viewing.requiredBalance - (viewing.user?.balance ?? 0)))} /><StaffDetail label="Total price" value={money(viewing.totalValue)} /><StaffDetail label="Commission" value={money(viewing.commission)} /><StaffDetail label="Created" value={dateTime(viewing.createdAt)} /><StaffDetail label="Customer approval" value={viewing.requiresCustomerApproval ? "Required" : "Not required"} /></div><div className="mt-5 rounded-2xl border border-slate-100"><p className="border-b border-slate-100 px-4 py-3 text-xs font-black uppercase text-slate-500">Products</p>{viewing.items.length ? viewing.items.map((item) => <div key={item.id} className="flex items-center justify-between gap-4 border-b border-slate-100 px-4 py-3 last:border-0"><div><p className="text-sm font-black text-slate-900">{item.productName}</p><p className="mt-1 text-xs font-semibold text-slate-400">{item.productCode} · Qty {item.quantity}</p></div><p className="text-sm font-black text-slate-900">{money(item.total)}</p></div>) : <p className="p-4 text-sm font-semibold text-slate-400">No product assigned yet.</p>}</div><div className="mt-6 flex justify-end gap-3"><Button variant="ghost" onClick={() => setViewing(null)}>Close</Button>{viewing.status === "WAITING_ASSIGNMENT" && !memberHasActiveAssignedTask(orders, viewing) && <Button onClick={() => beginAssignment(viewing)}><ClipboardList size={16} /> Assign product</Button>}</div></Modal>}
 
     {target && <AssignmentProductPicker order={target} products={products.map((product) => ({ ...product, commission: calculateCommission(product.price, target.user?.level ?? "STARTER") }))} onClose={() => setTarget(null)} onSave={(productId) => perform(`/admin/orders/${target.id}/assign`, { items: [{ productId, quantity: 1 }] }, "Product assigned successfully.")} />}
   </>;

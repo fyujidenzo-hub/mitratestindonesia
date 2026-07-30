@@ -68,6 +68,7 @@ export type Bank = {
   accountName: string;
   accountNumber: string;
   minimumDeposit: number;
+  maximumDeposit: number;
   active: boolean;
 };
 
@@ -79,6 +80,7 @@ export type Transaction = {
   amount: number;
   status: TransactionStatus;
   senderName?: string;
+  description?: string;
   proofOriginalName?: string;
   withdrawalBankName?: string;
   withdrawalAccountName?: string;
@@ -102,6 +104,7 @@ export type OrderItem = {
   commission: number;
   quantity: number;
   total: number;
+  product_image_url?: string | null;
   product?: { imageUrl: string } | null;
 };
 
@@ -119,6 +122,7 @@ export type Order = {
   completedAt?: string;
   commissionCreditedAt?: string;
   createdAt: string;
+  taskSequence?: number;
   items: OrderItem[];
   user?: Pick<User, "username" | "displayName" | "phone" | "balance" | "totalOrders" | "level"> & {
     referrer?: Pick<User, "id" | "displayName" | "adminCode">;
