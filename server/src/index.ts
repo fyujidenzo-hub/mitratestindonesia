@@ -17,6 +17,30 @@ import { HttpError } from "./lib/http.js";
 const app = express();
 const port = Number(process.env.PORT || 3001);
 
+type EmbeddedClientAsset = {
+  contentType: string;
+  content: string;
+};
+
+// The production build replaces this marker with the complete Vite output.
+// Keeping the SPA in the entry module prevents managed hosts from dropping
+// non-JavaScript assets while preparing their runtime artifact.
+const embeddedClientAssets: Record<string, EmbeddedClientAsset> =
+  /* __EMBEDDED_CLIENT_ASSETS__ */ {};
+const embeddedClientBuffers = new Map<string, Buffer>();
+
+function embeddedClientBuffer(publicPath: string) {
+  const cached = embeddedClientBuffers.get(publicPath);
+  if (cached) return cached;
+
+  const asset = embeddedClientAssets[publicPath];
+  if (!asset) return null;
+
+  const buffer = Buffer.from(asset.content, "base64");
+  embeddedClientBuffers.set(publicPath, buffer);
+  return buffer;
+}
+
 app.set("trust proxy", 1);
 app.use(helmet({
   crossOriginResourcePolicy: { policy: "cross-origin" },
@@ -45,6 +69,7 @@ app.use("/api/admin", adminRoutes);
 
 if (process.env.NODE_ENV === "production") {
   const moduleDirectory = path.dirname(fileURLToPath(import.meta.url));
+  const hasEmbeddedClient = Boolean(embeddedClientAssets["/index.html"]);
   const clientDistCandidates = [
     path.resolve(moduleDirectory, "client"),
     path.resolve(moduleDirectory, "../client"),
@@ -56,8 +81,23 @@ if (process.env.NODE_ENV === "production") {
     existsSync(path.join(candidate, "index.html")),
   );
 
-  if (!clientDist) {
+  if (!clientDist && !hasEmbeddedClient) {
     console.error("Client build not found. Checked:", clientDistCandidates);
+  }
+
+  if (hasEmbeddedClient) {
+    app.use((request, response, next) => {
+      if (request.path === "/" || request.path === "/index.html") return next();
+
+      const asset = embeddedClientAssets[request.path];
+      const buffer = embeddedClientBuffer(request.path);
+      if (!asset || !buffer) return next();
+
+      return response
+        .set("Cache-Control", "public, max-age=3600")
+        .type(asset.contentType)
+        .send(buffer);
+    });
   }
 
   app.use(
@@ -68,6 +108,15 @@ if (process.env.NODE_ENV === "production") {
   );
 
   app.use((_request, response, next) => {
+    const embeddedIndex = embeddedClientAssets["/index.html"];
+    const embeddedIndexBuffer = embeddedClientBuffer("/index.html");
+    if (embeddedIndex && embeddedIndexBuffer) {
+      return response
+        .set("Cache-Control", "no-cache")
+        .type(embeddedIndex.contentType)
+        .send(embeddedIndexBuffer);
+    }
+
     if (!clientDist) {
       return next(new Error("The client application was not included in the production build."));
     }
