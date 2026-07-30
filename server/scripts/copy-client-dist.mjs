@@ -5,7 +5,9 @@ import { fileURLToPath } from "node:url";
 const scriptDirectory = path.dirname(fileURLToPath(import.meta.url));
 const serverRoot = path.resolve(scriptDirectory, "..");
 const source = path.resolve(serverRoot, "../client/dist");
-const destination = path.resolve(serverRoot, "dist/client");
+// Keep the SPA inside the entry file's directory. Hostinger packages
+// `server/dist/src` for the Node runtime and may omit sibling directories.
+const destination = path.resolve(serverRoot, "dist/src/client");
 const sourceIndex = path.join(source, "index.html");
 
 if (!existsSync(sourceIndex)) {

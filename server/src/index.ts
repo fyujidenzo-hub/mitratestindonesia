@@ -46,6 +46,7 @@ app.use("/api/admin", adminRoutes);
 if (process.env.NODE_ENV === "production") {
   const moduleDirectory = path.dirname(fileURLToPath(import.meta.url));
   const clientDistCandidates = [
+    path.resolve(moduleDirectory, "client"),
     path.resolve(moduleDirectory, "../client"),
     path.resolve(process.cwd(), "client/dist"),
     path.resolve(process.cwd(), "../client/dist"),
