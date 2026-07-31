@@ -75,8 +75,10 @@ export default function AdminPage() {
       if (mode === "initial" || mode === "manual") setRefreshing(false);
     }
   }, []);
-  const loadLiveOverview = useCallback(async () => {
-    if (liveRequestActiveRef.current) return;
+  const loadLiveOverview = useCallback(async (force = false) => {
+    // A filter change must not wait for the background refresh already in
+    // progress. Start a new request and discard the older response instead.
+    if (liveRequestActiveRef.current && !force) return;
     liveRequestActiveRef.current = true;
     const requestId = ++latestLiveRequestRef.current;
     try {
@@ -102,7 +104,9 @@ export default function AdminPage() {
       // Keep the last successful snapshot visible; the manual refresh still
       // surfaces connection errors without making the dashboard flicker.
     } finally {
-      liveRequestActiveRef.current = false;
+      if (requestId === latestLiveRequestRef.current) {
+        liveRequestActiveRef.current = false;
+      }
     }
   }, [overviewAdminId, overviewPeriod]);
   useEffect(() => { void load("initial"); }, [load]);
@@ -111,7 +115,7 @@ export default function AdminPage() {
     const refreshWhenVisible = () => {
       if (document.visibilityState === "visible") void loadLiveOverview();
     };
-    refreshWhenVisible();
+    void loadLiveOverview(true);
     const interval = window.setInterval(refreshWhenVisible, 4_000);
     document.addEventListener("visibilitychange", refreshWhenVisible);
     window.addEventListener("focus", refreshWhenVisible);
