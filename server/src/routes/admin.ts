@@ -217,6 +217,56 @@ function jakartaDayBounds(now = new Date()) {
   return { date, start, end };
 }
 
+const overviewPeriodSchema = z.enum(["daily", "weekly", "monthly", "yearly"]);
+type OverviewPeriod = z.infer<typeof overviewPeriodSchema>;
+
+function jakartaDateString(date: Date) {
+  const parts = new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Asia/Jakarta",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).formatToParts(date);
+  const part = (type: Intl.DateTimeFormatPartTypes) => parts.find((item) => item.type === type)?.value ?? "";
+  return `${part("year")}-${part("month")}-${part("day")}`;
+}
+
+/** Returns calendar-aligned Jakarta ranges for the administrator report. */
+function jakartaPeriodBounds(period: OverviewPeriod, now = new Date()) {
+  const today = jakartaDayBounds(now);
+  if (period === "daily") return { ...today, label: today.date };
+
+  const oneDay = 24 * 60 * 60 * 1000;
+  if (period === "weekly") {
+    // Noon Jakarta converted to UTC keeps getUTCDay aligned with Jakarta's day.
+    const weekday = new Date(`${today.date}T12:00:00+07:00`).getUTCDay();
+    const mondayOffset = (weekday + 6) % 7;
+    const start = new Date(today.start.getTime() - mondayOffset * oneDay);
+    const end = new Date(start.getTime() + 7 * oneDay);
+    return { start, end, label: `${jakartaDateString(start)} – ${jakartaDateString(new Date(end.getTime() - 1))}` };
+  }
+
+  const [yearText, monthText] = today.date.split("-");
+  const year = Number(yearText);
+  const month = Number(monthText);
+  if (period === "monthly") {
+    const start = new Date(`${yearText}-${monthText}-01T00:00:00+07:00`);
+    const nextYear = month === 12 ? year + 1 : year;
+    const nextMonth = String(month === 12 ? 1 : month + 1).padStart(2, "0");
+    const end = new Date(`${nextYear}-${nextMonth}-01T00:00:00+07:00`);
+    return { start, end, label: `${yearText}-${monthText}` };
+  }
+
+  const start = new Date(`${yearText}-01-01T00:00:00+07:00`);
+  const end = new Date(`${year + 1}-01-01T00:00:00+07:00`);
+  return { start, end, label: yearText };
+}
+
+const overviewLiveQuerySchema = z.object({
+  period: overviewPeriodSchema.optional().default("daily"),
+  adminId: z.string().cuid().optional(),
+});
+
 type DailyFinancialActivityRow = {
   referrerId: string;
   type: TransactionType;
@@ -229,7 +279,10 @@ type OrderSequenceRow = {
   taskSequence: bigint;
 };
 
-async function dailyFinancialActivity(start: Date, end: Date) {
+async function dailyFinancialActivity(start: Date, end: Date, adminId?: string) {
+  const adminFilter = adminId
+    ? Prisma.sql`AND customer."referrerId" = ${adminId}`
+    : Prisma.empty;
   return prisma.$queryRaw<DailyFinancialActivityRow[]>(Prisma.sql`
     SELECT
       customer."referrerId" AS "referrerId",
@@ -246,6 +299,7 @@ async function dailyFinancialActivity(start: Date, end: Date) {
       AND tx."createdAt" >= ${start}
       AND tx."createdAt" < ${end}
       AND customer."referrerId" IS NOT NULL
+      ${adminFilter}
     GROUP BY customer."referrerId", tx."type"
   `);
 }
@@ -374,6 +428,10 @@ router.get(
   asyncHandler(async (request: AuthRequest, response) => {
     response.setHeader("Cache-Control", "private, no-store");
     const isSuperAdmin = request.auth!.role === UserRole.SUPER_ADMIN;
+    const { period, adminId: requestedAdminId } = overviewLiveQuerySchema.parse(request.query);
+    // Only Super Admins can narrow the administrator activity report. Other
+    // administrator roles continue to receive their own scoped dashboard.
+    const reportAdminId = isSuperAdmin ? requestedAdminId : undefined;
     const userFilter: Prisma.UserWhereInput = isSuperAdmin
       ? { role: UserRole.CUSTOMER }
       : { role: UserRole.CUSTOMER, referrerId: request.auth!.id };
@@ -383,7 +441,7 @@ router.get(
     const orderFilter: Prisma.OrderWhereInput = isSuperAdmin
       ? {}
       : { user: { referrerId: request.auth!.id } };
-    const jakartaDay = jakartaDayBounds();
+    const reportPeriod = jakartaPeriodBounds(period);
 
     const [
       memberTotals,
@@ -441,6 +499,8 @@ router.get(
       }),
       isSuperAdmin
         ? prisma.user.findMany({
+          // Keep the complete administrator list available for the filter even
+          // after the report itself has been narrowed to one administrator.
           where: { role: { in: staffRoles } },
           select: staffSelect,
           orderBy: [{ isActive: "desc" }, { createdAt: "asc" }],
@@ -451,14 +511,14 @@ router.get(
           by: ["referrerId"],
           where: {
             role: UserRole.CUSTOMER,
-            referrerId: { not: null },
-            createdAt: { gte: jakartaDay.start, lt: jakartaDay.end },
+            referrerId: reportAdminId ?? { not: null },
+            createdAt: { gte: reportPeriod.start, lt: reportPeriod.end },
           },
           _count: { _all: true },
         })
         : Promise.resolve([]),
       isSuperAdmin
-        ? dailyFinancialActivity(jakartaDay.start, jakartaDay.end)
+        ? dailyFinancialActivity(reportPeriod.start, reportPeriod.end, reportAdminId)
         : Promise.resolve([]),
     ]);
 
@@ -471,7 +531,10 @@ router.get(
     const financialActivityByAdmin = new Map(
       dailyFinancialRows.map((row) => [`${row.referrerId}:${row.type}`, row]),
     );
-    const dailyAdminStats = staff.map((staffMember) => {
+    const reportStaff = reportAdminId
+      ? staff.filter((staffMember) => staffMember.id === reportAdminId)
+      : staff;
+    const dailyAdminStats = reportStaff.map((staffMember) => {
       const topups = financialActivityByAdmin.get(`${staffMember.id}:${TransactionType.TOPUP}`);
       const withdrawals = financialActivityByAdmin.get(`${staffMember.id}:${TransactionType.WITHDRAWAL}`);
       return {
@@ -498,7 +561,10 @@ router.get(
         tasksAwaitingAssignment: pendingTasks,
       },
       dailyAdminStats,
-      dailyStatsDate: jakartaDay.date,
+      dailyStatsDate: reportPeriod.label,
+      statsPeriod: period,
+      statsRangeLabel: reportPeriod.label,
+      administrators: staff,
       latestTransactions,
       latestOrders,
       refreshedAt: new Date(),
