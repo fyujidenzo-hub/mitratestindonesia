@@ -75,16 +75,19 @@ export default function AdminPage() {
       if (mode === "initial" || mode === "manual") setRefreshing(false);
     }
   }, []);
-  const loadLiveOverview = useCallback(async (force = false) => {
+  const loadLiveOverview = useCallback(async (options: { force?: boolean; period?: OverviewPeriod; adminId?: string } = {}) => {
+    const force = options.force ?? false;
+    const period = options.period ?? overviewPeriod;
+    const adminId = options.adminId ?? overviewAdminId;
     // A filter change must not wait for the background refresh already in
     // progress. Start a new request and discard the older response instead.
     if (liveRequestActiveRef.current && !force) return;
     liveRequestActiveRef.current = true;
     const requestId = ++latestLiveRequestRef.current;
     try {
-      const search = new URLSearchParams({ period: overviewPeriod });
-      if (overviewAdminId) search.set("adminId", overviewAdminId);
-      const nextOverview = await api<LiveOverviewData>(`/admin/overview/live?${search.toString()}`);
+      const search = new URLSearchParams({ period });
+      if (adminId) search.set("adminId", adminId);
+      const nextOverview = await api<LiveOverviewData>(`/admin/overview/live?${search.toString()}`, { cache: "no-store" });
       if (requestId !== latestLiveRequestRef.current) return;
       const nextFingerprint = JSON.stringify([
         nextOverview.metrics,
@@ -115,7 +118,7 @@ export default function AdminPage() {
     const refreshWhenVisible = () => {
       if (document.visibilityState === "visible") void loadLiveOverview();
     };
-    void loadLiveOverview(true);
+    void loadLiveOverview({ force: true });
     const interval = window.setInterval(refreshWhenVisible, 4_000);
     document.addEventListener("visibilitychange", refreshWhenVisible);
     window.addEventListener("focus", refreshWhenVisible);
@@ -158,7 +161,7 @@ export default function AdminPage() {
     <div className="flex"><aside className={`${menuOpen ? "fixed inset-0 z-50 flex" : "hidden"} w-full bg-slate-950/50 lg:sticky lg:top-16 lg:flex lg:h-[calc(100vh-4rem)] lg:w-64 lg:bg-transparent`}><div className="h-full w-72 bg-slate-950 p-4 text-white lg:w-full"><div className="mb-5 flex items-center justify-between lg:hidden"><Brand inverse compact /><button aria-label="Close navigation" onClick={() => setMenuOpen(false)}><X /></button></div><nav className="grid gap-1.5">{visibleTabs.map(({ key, label, icon: Icon }) => <button key={key} onClick={() => { setTab(key); setMenuOpen(false); }} className={`flex items-center gap-3 rounded-2xl px-4 py-3 text-left text-sm font-black transition ${tab === key ? "bg-gradient-to-r from-shopee-500 to-orange-500 text-white shadow-lg" : "text-slate-400 hover:bg-white/5 hover:text-white"}`}><Icon size={19} />{t(label)}<ChevronRight size={15} className="ml-auto opacity-40" /></button>)}</nav><div className="mt-6 rounded-2xl border border-white/10 bg-white/5 p-4"><p className="text-[10px] font-black uppercase tracking-[.16em] text-slate-500">{t("Invitation code")}</p><p className="mt-2 text-xl font-black text-white">{user?.invitationCode || "-"}</p><p className="mt-1 text-xs font-semibold text-slate-500">Bonus {money(user?.registrationBonus ?? 0)}</p></div></div><button aria-label="Close navigation overlay" className="flex-1 lg:hidden" onClick={() => setMenuOpen(false)} /></aside>
       <main className="min-w-0 flex-1 p-4 sm:p-6 lg:p-8"><div className="mx-auto max-w-[1680px]"><div className="flex flex-wrap items-center justify-between gap-4"><div><p className="text-xs font-black uppercase tracking-[.18em] text-shopee-500">Admin command center</p><h1 className="mt-1 text-2xl font-black tracking-tight sm:text-3xl">{t(visibleTabs.find((item) => item.key === tab)?.label ?? "Overview")}</h1></div><div className="flex items-center gap-2">{tab === "overview" && <span className="hidden items-center gap-2 rounded-full border border-emerald-100 bg-emerald-50 px-3 py-2 text-[10px] font-black uppercase tracking-wide text-emerald-700 sm:inline-flex"><span className="h-2 w-2 animate-pulse rounded-full bg-emerald-500" /> Live data</span>}<Button variant="ghost" loading={refreshing} onClick={() => { void load("manual"); if (tab === "overview") void loadLiveOverview(); }}><RefreshCw size={17} /> {t("Refresh data")}</Button></div></div>{message && <div className="mt-5"><Notice message={message} tone={tone} onClose={() => setMessage("")} /></div>}
         {!["members", "tasks", "topups", "withdrawals"].includes(tab) && <div className="relative mt-5 md:hidden"><Search size={17} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" /><input value={query} onChange={(e) => setQuery(e.target.value)} className={`${inputClass} pl-10`} placeholder={t("Search data")} /></div>}
-        {tab === "overview" ? (liveOverview || data ? <Overview members={liveOverview?.metrics.members ?? data?.members.length ?? 0} totalBalance={liveOverview?.metrics.totalBalance ?? totalBalance} pendingTopups={overviewPendingTopups} pendingWithdrawals={overviewPendingWithdrawals} pendingTasks={liveOverview?.metrics.tasksAwaitingAssignment ?? pendingTasks} transactions={liveOverview?.latestTransactions ?? data?.transactions ?? []} orders={liveOverview?.latestOrders ?? data?.orders ?? []} dailyAdminStats={liveOverview?.dailyAdminStats ?? data?.dailyAdminStats ?? []} dailyStatsDate={liveOverview?.statsRangeLabel ?? liveOverview?.dailyStatsDate ?? data?.dailyStatsDate ?? ""} administrators={liveOverview?.administrators ?? data?.staff ?? []} overviewPeriod={overviewPeriod} overviewAdminId={overviewAdminId} onOverviewPeriodChange={setOverviewPeriod} onOverviewAdminChange={setOverviewAdminId} showAdminPerformance={user?.role === "SUPER_ADMIN"} /> : <AdminDataSkeleton />) : !data ? <AdminDataSkeleton /> : <>
+        {tab === "overview" ? (liveOverview || data ? <Overview members={liveOverview?.metrics.members ?? data?.members.length ?? 0} totalBalance={liveOverview?.metrics.totalBalance ?? totalBalance} pendingTopups={overviewPendingTopups} pendingWithdrawals={overviewPendingWithdrawals} pendingTasks={liveOverview?.metrics.tasksAwaitingAssignment ?? pendingTasks} transactions={liveOverview?.latestTransactions ?? data?.transactions ?? []} orders={liveOverview?.latestOrders ?? data?.orders ?? []} dailyAdminStats={liveOverview?.dailyAdminStats ?? data?.dailyAdminStats ?? []} dailyStatsDate={liveOverview?.statsRangeLabel ?? liveOverview?.dailyStatsDate ?? data?.dailyStatsDate ?? ""} administrators={liveOverview?.administrators ?? data?.staff ?? []} overviewPeriod={overviewPeriod} overviewAdminId={overviewAdminId} onOverviewPeriodChange={(value) => { setOverviewPeriod(value); void loadLiveOverview({ force: true, period: value, adminId: overviewAdminId }); }} onOverviewAdminChange={(value) => { setOverviewAdminId(value); void loadLiveOverview({ force: true, period: overviewPeriod, adminId: value }); }} showAdminPerformance={user?.role === "SUPER_ADMIN"} /> : <AdminDataSkeleton />) : !data ? <AdminDataSkeleton /> : <>
           {tab === "members" && <Members members={filteredMembers} orders={data.orders} adminFilterId={selectedAdminId} scopePanel={adminScopePanel} canManage={user?.role === "SUPER_ADMIN"} canManageSecurity={user?.role === "SUPER_ADMIN" || user?.role === "ADMIN"} canManageWithdrawals={user?.role === "SUPER_ADMIN" || user?.role === "ADMIN"} perform={perform} />}
           {tab === "tasks" && <Tasks orders={filteredOrders} products={data.taskProducts} phoneQuery={phoneQuery} onPhoneQueryChange={setPhoneQuery} scopePanel={adminScopePanel} perform={perform} />}
           {tab === "topups" && <Topups transactions={filteredTopups} phoneQuery={phoneQuery} onPhoneQueryChange={setPhoneQuery} scopePanel={adminScopePanel} canReview={user?.role === "SUPER_ADMIN"} perform={perform} />}
