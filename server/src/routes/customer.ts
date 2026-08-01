@@ -2,12 +2,12 @@ import { Router } from "express";
 import bcrypt from "bcryptjs";
 import rateLimit from "express-rate-limit";
 import multer from "multer";
-import path from "node:path";
 import { z } from "zod";
 import { OrderStatus, TransactionStatus, TransactionType, UserRole } from "@prisma/client";
 import { authenticateCustomer, type AuthRequest } from "../middleware/auth.js";
 import { prisma } from "../lib/prisma.js";
 import { asyncHandler, HttpError, jsonSafe, requestNumber } from "../lib/http.js";
+import { paymentProofMimeTypes, paymentProofStorageName } from "../lib/proof-storage.js";
 import {
   parseRewardMilestones,
   rewardSettingKeys,
@@ -59,15 +59,9 @@ router.post(
 );
 
 const upload = multer({
-  storage: multer.diskStorage({
-    destination: path.resolve("uploads"),
-    filename: (_request, file, callback) => {
-      const extension = path.extname(file.originalname).replace(/[^.a-zA-Z0-9]/g, "").slice(0, 8) || ".jpg";
-      callback(null, `${Date.now()}-${Math.random().toString(36).slice(2, 9)}${extension}`);
-    },
-  }),
+  storage: multer.memoryStorage(),
   limits: { fileSize: 5 * 1024 * 1024 },
-  fileFilter: (_request, file, callback) => callback(null, file.mimetype.startsWith("image/")),
+  fileFilter: (_request, file, callback) => callback(null, paymentProofMimeTypes.has(file.mimetype)),
 });
 
 router.get(
@@ -179,6 +173,7 @@ router.post(
       throw new HttpError(400, `The top-up amount for ${activeBank.bankName} must be between Rp ${minimum} and Rp ${maximum}.`);
     }
 
+    const proofData = Uint8Array.from(request.file.buffer);
     const transaction = await prisma.transaction.create({
       data: {
         requestNumber: requestNumber("TU"),
@@ -186,8 +181,14 @@ router.post(
         type: TransactionType.TOPUP,
         amount,
         senderName: input.senderName,
-        proofPath: request.file.filename,
+        proofPath: paymentProofStorageName(request.file.mimetype),
         proofOriginalName: request.file.originalname,
+        proofFile: {
+          create: {
+            mimeType: request.file.mimetype,
+            data: proofData,
+          },
+        },
       },
     });
     response.status(201).json(jsonSafe({ transaction }));

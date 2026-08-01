@@ -1,9 +1,9 @@
 import { AlertTriangle, BadgeDollarSign, Banknote, Boxes, Check, ChevronDown, ChevronLeft, ChevronRight, ClipboardList, ExternalLink, Eye, Gift, LayoutDashboard, LockKeyhole, LogOut, Menu, PackageCheck, PackagePlus, Pencil, Plus, Power, RefreshCw, Search, Send, Settings2, ShieldCheck, ShoppingBag, Trash2, UserCog, UserPlus, Users, WalletCards, X } from "lucide-react";
-import { startTransition, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { Brand } from "../components/Brand";
 import { Button, Card, Field, inputClass, Notice, StatusPill } from "../components/Ui";
-import { api, dateTime, money } from "../lib/api";
+import { api, apiUrl, dateTime, money } from "../lib/api";
 import { useAuth } from "../lib/auth";
 import { LanguageSwitcher, translateText, useI18n, type Language } from "../lib/i18n";
 import { calculateCommission, commissionPercent, membershipLabel } from "../lib/commission";
@@ -54,7 +54,7 @@ export default function AdminPage() {
   const latestLiveRequestRef = useRef(0);
   const liveFingerprintRef = useRef("");
   useAdminTextTranslation(adminRootRef, language);
-  const [data, setData] = useState<AdminData | null>(null); const [liveOverview, setLiveOverview] = useState<LiveOverviewData | null>(null); const [tab, setTab] = useState<Tab>("overview"); const [query, setQuery] = useState(""); const [phoneQuery, setPhoneQuery] = useState(""); const [selectedAdminId, setSelectedAdminId] = useState(""); const [overviewAdminId, setOverviewAdminId] = useState(""); const [overviewPeriod, setOverviewPeriod] = useState<OverviewPeriod>("daily"); const [menuOpen, setMenuOpen] = useState(false); const [message, setMessage] = useState(""); const [tone, setTone] = useState<"success" | "error">("success"); const [refreshing, setRefreshing] = useState(false);
+  const [data, setData] = useState<AdminData | null>(null); const [liveOverview, setLiveOverview] = useState<LiveOverviewData | null>(null); const [loadedOverviewKey, setLoadedOverviewKey] = useState(""); const [tab, setTab] = useState<Tab>("overview"); const [query, setQuery] = useState(""); const [phoneQuery, setPhoneQuery] = useState(""); const [selectedAdminId, setSelectedAdminId] = useState(""); const [overviewAdminId, setOverviewAdminId] = useState(""); const [overviewPeriod, setOverviewPeriod] = useState<OverviewPeriod>("daily"); const [overviewLoading, setOverviewLoading] = useState(false); const [overviewError, setOverviewError] = useState(""); const [menuOpen, setMenuOpen] = useState(false); const [message, setMessage] = useState(""); const [tone, setTone] = useState<"success" | "error">("success"); const [refreshing, setRefreshing] = useState(false);
   const load = useCallback(async (mode: "initial" | "manual" | "mutation" = "manual") => {
     const requestId = ++latestRequestRef.current;
     activeRequestsRef.current += 1;
@@ -79,16 +79,26 @@ export default function AdminPage() {
     const force = options.force ?? false;
     const period = options.period ?? overviewPeriod;
     const adminId = options.adminId ?? overviewAdminId;
-    // A filter change must not wait for the background refresh already in
-    // progress. Start a new request and discard the older response instead.
+    // A filter change must not wait for an older request already in progress.
+    // Start a new request and discard the older response instead.
     if (liveRequestActiveRef.current && !force) return;
     liveRequestActiveRef.current = true;
     const requestId = ++latestLiveRequestRef.current;
+    const requestKey = `${period}:${adminId || "all"}`;
+    setOverviewLoading(true);
+    setOverviewError("");
     try {
       const search = new URLSearchParams({ period });
       if (adminId) search.set("adminId", adminId);
-      const nextOverview = await api<LiveOverviewData>(`/admin/overview/live?${search.toString()}`, { cache: "no-store" });
+      search.set("_", String(Date.now()));
+      const nextOverview = await api<LiveOverviewData>(`/admin/overview/live?${search.toString()}`, {
+        cache: "no-store",
+        headers: { "Cache-Control": "no-cache", Pragma: "no-cache" },
+      });
       if (requestId !== latestLiveRequestRef.current) return;
+      if (nextOverview.statsPeriod !== period) {
+        throw new Error("The report server returned an outdated period. Please try again.");
+      }
       const nextFingerprint = JSON.stringify([
         nextOverview.metrics,
         nextOverview.dailyAdminStats,
@@ -101,32 +111,26 @@ export default function AdminPage() {
       ]);
       if (nextFingerprint !== liveFingerprintRef.current) {
         liveFingerprintRef.current = nextFingerprint;
-        startTransition(() => setLiveOverview(nextOverview));
+        setLiveOverview(nextOverview);
       }
-    } catch {
-      // Keep the last successful snapshot visible; the manual refresh still
-      // surfaces connection errors without making the dashboard flicker.
+      // Bind the response to the exact filter that requested it. This keeps a
+      // previous report from being displayed under a newly selected label.
+      setLoadedOverviewKey(requestKey);
+    } catch (error) {
+      if (requestId === latestLiveRequestRef.current) {
+        setOverviewError(error instanceof Error ? error.message : "Unable to load the selected report.");
+      }
     } finally {
       if (requestId === latestLiveRequestRef.current) {
         liveRequestActiveRef.current = false;
+        setOverviewLoading(false);
       }
     }
   }, [overviewAdminId, overviewPeriod]);
   useEffect(() => { void load("initial"); }, [load]);
   useEffect(() => {
     if (tab !== "overview") return;
-    const refreshWhenVisible = () => {
-      if (document.visibilityState === "visible") void loadLiveOverview();
-    };
     void loadLiveOverview({ force: true });
-    const interval = window.setInterval(refreshWhenVisible, 4_000);
-    document.addEventListener("visibilitychange", refreshWhenVisible);
-    window.addEventListener("focus", refreshWhenVisible);
-    return () => {
-      window.clearInterval(interval);
-      document.removeEventListener("visibilitychange", refreshWhenVisible);
-      window.removeEventListener("focus", refreshWhenVisible);
-    };
   }, [loadLiveOverview, tab]);
   const visibleTabs = tabs.filter((item) => !item.superOnly || user?.role === "SUPER_ADMIN");
   const say = (value: string, nextTone: "success" | "error" = "success") => { setTone(nextTone); setMessage(value); };
@@ -153,6 +157,8 @@ export default function AdminPage() {
   const totalBalance = data?.members.reduce((sum, member) => sum + member.balance, 0) ?? 0;
   const overviewPendingTopups = liveOverview?.metrics.pendingTopups ?? pendingTopups;
   const overviewPendingWithdrawals = liveOverview?.metrics.pendingWithdrawals ?? pendingWithdrawals;
+  const currentOverviewKey = `${overviewPeriod}:${overviewAdminId || "all"}`;
+  const selectedOverviewReport = loadedOverviewKey === currentOverviewKey ? liveOverview : null;
   const adminScopePanel = user?.role === "SUPER_ADMIN"
     ? <AdminScopeFilter staff={data?.staff ?? []} selectedAdminId={selectedAdminId} onChange={setSelectedAdminId} />
     : null;
@@ -161,7 +167,7 @@ export default function AdminPage() {
     <div className="flex"><aside className={`${menuOpen ? "fixed inset-0 z-50 flex" : "hidden"} w-full bg-slate-950/50 lg:sticky lg:top-16 lg:flex lg:h-[calc(100vh-4rem)] lg:w-64 lg:bg-transparent`}><div className="h-full w-72 bg-slate-950 p-4 text-white lg:w-full"><div className="mb-5 flex items-center justify-between lg:hidden"><Brand inverse compact /><button aria-label="Close navigation" onClick={() => setMenuOpen(false)}><X /></button></div><nav className="grid gap-1.5">{visibleTabs.map(({ key, label, icon: Icon }) => <button key={key} onClick={() => { setTab(key); setMenuOpen(false); }} className={`flex items-center gap-3 rounded-2xl px-4 py-3 text-left text-sm font-black transition ${tab === key ? "bg-gradient-to-r from-shopee-500 to-orange-500 text-white shadow-lg" : "text-slate-400 hover:bg-white/5 hover:text-white"}`}><Icon size={19} />{t(label)}<ChevronRight size={15} className="ml-auto opacity-40" /></button>)}</nav><div className="mt-6 rounded-2xl border border-white/10 bg-white/5 p-4"><p className="text-[10px] font-black uppercase tracking-[.16em] text-slate-500">{t("Invitation code")}</p><p className="mt-2 text-xl font-black text-white">{user?.invitationCode || "-"}</p><p className="mt-1 text-xs font-semibold text-slate-500">Bonus {money(user?.registrationBonus ?? 0)}</p></div></div><button aria-label="Close navigation overlay" className="flex-1 lg:hidden" onClick={() => setMenuOpen(false)} /></aside>
       <main className="min-w-0 flex-1 p-4 sm:p-6 lg:p-8"><div className="mx-auto max-w-[1680px]"><div className="flex flex-wrap items-center justify-between gap-4"><div><p className="text-xs font-black uppercase tracking-[.18em] text-shopee-500">Admin command center</p><h1 className="mt-1 text-2xl font-black tracking-tight sm:text-3xl">{t(visibleTabs.find((item) => item.key === tab)?.label ?? "Overview")}</h1></div><div className="flex items-center gap-2">{tab === "overview" && <span className="hidden items-center gap-2 rounded-full border border-emerald-100 bg-emerald-50 px-3 py-2 text-[10px] font-black uppercase tracking-wide text-emerald-700 sm:inline-flex"><span className="h-2 w-2 animate-pulse rounded-full bg-emerald-500" /> Live data</span>}<Button variant="ghost" loading={refreshing} onClick={() => { void load("manual"); if (tab === "overview") void loadLiveOverview(); }}><RefreshCw size={17} /> {t("Refresh data")}</Button></div></div>{message && <div className="mt-5"><Notice message={message} tone={tone} onClose={() => setMessage("")} /></div>}
         {!["members", "tasks", "topups", "withdrawals"].includes(tab) && <div className="relative mt-5 md:hidden"><Search size={17} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" /><input value={query} onChange={(e) => setQuery(e.target.value)} className={`${inputClass} pl-10`} placeholder={t("Search data")} /></div>}
-        {tab === "overview" ? (liveOverview || data ? <Overview members={liveOverview?.metrics.members ?? data?.members.length ?? 0} totalBalance={liveOverview?.metrics.totalBalance ?? totalBalance} pendingTopups={overviewPendingTopups} pendingWithdrawals={overviewPendingWithdrawals} pendingTasks={liveOverview?.metrics.tasksAwaitingAssignment ?? pendingTasks} transactions={liveOverview?.latestTransactions ?? data?.transactions ?? []} orders={liveOverview?.latestOrders ?? data?.orders ?? []} dailyAdminStats={liveOverview?.dailyAdminStats ?? data?.dailyAdminStats ?? []} dailyStatsDate={liveOverview?.statsRangeLabel ?? liveOverview?.dailyStatsDate ?? data?.dailyStatsDate ?? ""} administrators={liveOverview?.administrators ?? data?.staff ?? []} overviewPeriod={overviewPeriod} overviewAdminId={overviewAdminId} onOverviewPeriodChange={(value) => { setOverviewPeriod(value); void loadLiveOverview({ force: true, period: value, adminId: overviewAdminId }); }} onOverviewAdminChange={(value) => { setOverviewAdminId(value); void loadLiveOverview({ force: true, period: overviewPeriod, adminId: value }); }} showAdminPerformance={user?.role === "SUPER_ADMIN"} /> : <AdminDataSkeleton />) : !data ? <AdminDataSkeleton /> : <>
+        {tab === "overview" ? (liveOverview || data ? <Overview members={liveOverview?.metrics.members ?? data?.members.length ?? 0} totalBalance={liveOverview?.metrics.totalBalance ?? totalBalance} pendingTopups={overviewPendingTopups} pendingWithdrawals={overviewPendingWithdrawals} pendingTasks={liveOverview?.metrics.tasksAwaitingAssignment ?? pendingTasks} transactions={liveOverview?.latestTransactions ?? data?.transactions ?? []} orders={liveOverview?.latestOrders ?? data?.orders ?? []} dailyAdminStats={selectedOverviewReport?.dailyAdminStats ?? []} dailyStatsDate={selectedOverviewReport?.statsRangeLabel ?? ""} administrators={liveOverview?.administrators ?? data?.staff ?? []} overviewPeriod={overviewPeriod} overviewAdminId={overviewAdminId} overviewLoading={overviewLoading || !selectedOverviewReport} overviewError={overviewError} onOverviewPeriodChange={(value) => { setLoadedOverviewKey(""); setOverviewLoading(true); setOverviewPeriod(value); }} onOverviewAdminChange={(value) => { setLoadedOverviewKey(""); setOverviewLoading(true); setOverviewAdminId(value); }} showAdminPerformance={user?.role === "SUPER_ADMIN"} /> : <AdminDataSkeleton />) : !data ? <AdminDataSkeleton /> : <>
           {tab === "members" && <Members members={filteredMembers} orders={data.orders} adminFilterId={selectedAdminId} scopePanel={adminScopePanel} canManage={user?.role === "SUPER_ADMIN"} canManageSecurity={user?.role === "SUPER_ADMIN" || user?.role === "ADMIN"} canManageWithdrawals={user?.role === "SUPER_ADMIN" || user?.role === "ADMIN"} perform={perform} />}
           {tab === "tasks" && <Tasks orders={filteredOrders} products={data.taskProducts} phoneQuery={phoneQuery} onPhoneQueryChange={setPhoneQuery} scopePanel={adminScopePanel} perform={perform} />}
           {tab === "topups" && <Topups transactions={filteredTopups} phoneQuery={phoneQuery} onPhoneQueryChange={setPhoneQuery} scopePanel={adminScopePanel} canReview={user?.role === "SUPER_ADMIN"} perform={perform} />}
@@ -261,11 +267,58 @@ function AdminDataSkeleton() {
   </div>;
 }
 
-function Overview({ members, totalBalance, pendingTopups, pendingWithdrawals, pendingTasks, transactions, orders, dailyAdminStats, dailyStatsDate, administrators, overviewPeriod, overviewAdminId, onOverviewPeriodChange, onOverviewAdminChange, showAdminPerformance }: { members: number; totalBalance: number; pendingTopups: number; pendingWithdrawals: number; pendingTasks: number; transactions: Transaction[]; orders: Order[]; dailyAdminStats: DailyAdminStat[]; dailyStatsDate: string; administrators: AdministratorOption[]; overviewPeriod: OverviewPeriod; overviewAdminId: string; onOverviewPeriodChange: (value: OverviewPeriod) => void; onOverviewAdminChange: (value: string) => void; showAdminPerformance: boolean }) {
+function Overview({ members, totalBalance, pendingTopups, pendingWithdrawals, pendingTasks, transactions, orders, dailyAdminStats, dailyStatsDate, administrators, overviewPeriod, overviewAdminId, overviewLoading, overviewError, onOverviewPeriodChange, onOverviewAdminChange, showAdminPerformance }: { members: number; totalBalance: number; pendingTopups: number; pendingWithdrawals: number; pendingTasks: number; transactions: Transaction[]; orders: Order[]; dailyAdminStats: DailyAdminStat[]; dailyStatsDate: string; administrators: AdministratorOption[]; overviewPeriod: OverviewPeriod; overviewAdminId: string; overviewLoading: boolean; overviewError: string; onOverviewPeriodChange: (value: OverviewPeriod) => void; onOverviewAdminChange: (value: string) => void; showAdminPerformance: boolean }) {
   const periodLabel = { daily: "Daily", weekly: "Weekly", monthly: "Monthly", yearly: "Yearly" }[overviewPeriod];
-  return <><div className="mt-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-4"><Metric icon={<Users />} label="Total members" value={String(members)} tone="orange" /><Metric icon={<WalletCards />} label="Total balance" value={money(totalBalance)} tone="green" /><Metric icon={<Banknote />} label="Finance requests" value={String(pendingTopups + pendingWithdrawals)} tone="blue" /><Metric icon={<ClipboardList />} label="Tasks awaiting assignment" value={String(pendingTasks)} tone="purple" /></div>
-    {showAdminPerformance && <Card className="mt-5 overflow-hidden"><div className="border-b border-slate-100 p-5"><div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between"><div><p className="text-[10px] font-black uppercase tracking-[.15em] text-shopee-500">{periodLabel} performance</p><h2 className="mt-1 text-lg font-black text-slate-900">Administrator activity summary</h2><p className="mt-1 text-xs font-semibold text-slate-400">Registrations, approved top-ups, and withdrawals for the selected period.</p></div><div className="grid gap-2 sm:grid-cols-2"><label className="grid gap-1 text-[10px] font-black uppercase tracking-wide text-slate-500"><span>View period</span><select className="h-10 min-w-[150px] rounded-xl border border-slate-200 bg-white px-3 text-sm font-bold normal-case tracking-normal text-slate-800 outline-none transition focus:border-shopee-400" value={overviewPeriod} onChange={(event) => onOverviewPeriodChange(event.target.value as OverviewPeriod)}><option value="daily">Daily</option><option value="weekly">Weekly</option><option value="monthly">Monthly</option><option value="yearly">Yearly</option></select></label><label className="grid gap-1 text-[10px] font-black uppercase tracking-wide text-slate-500"><span>Administrator</span><select className="h-10 min-w-[210px] rounded-xl border border-slate-200 bg-white px-3 text-sm font-bold normal-case tracking-normal text-slate-800 outline-none transition focus:border-shopee-400" value={overviewAdminId} onChange={(event) => onOverviewAdminChange(event.target.value)}><option value="">All administrators</option>{administrators.map((administrator) => <option key={administrator.id} value={administrator.id}>{administrator.adminCode || "No code"} — {administrator.displayName}</option>)}</select></label></div></div>{dailyStatsDate && <span className="mt-4 inline-flex rounded-full bg-orange-50 px-3 py-1.5 text-[10px] font-black uppercase tracking-wide text-shopee-600">{dailyStatsDate} · WIB</span>}</div><div className="grid gap-3 p-4 md:hidden">{dailyAdminStats.map((stat) => <article key={stat.adminId} className="rounded-2xl border border-slate-100 bg-slate-50 p-4"><div className="flex items-center justify-between gap-3"><div><p className="font-black text-slate-900">{stat.displayName}</p><p className="mt-1 text-[10px] font-black uppercase tracking-wide text-shopee-500">{stat.adminCode || "No admin code"}</p></div><span className="rounded-xl bg-white px-3 py-2 text-center"><span className="block text-lg font-black text-slate-900">{stat.registrations}</span><span className="text-[9px] font-black uppercase text-slate-400">Members</span></span></div><div className="mt-4 grid grid-cols-2 gap-3"><DailyFinanceMetric label="Top-ups" count={stat.topupCount} amount={stat.topupAmount} /><DailyFinanceMetric label="Withdrawals" count={stat.withdrawalCount} amount={stat.withdrawalAmount} /></div></article>)}{!dailyAdminStats.length && <p className="py-8 text-center text-sm font-bold text-slate-400">No administrator activity is available.</p>}</div><div className="hidden overflow-x-auto md:block"><table className="w-full min-w-[850px]"><thead><tr><th className={tableHeadClass}>Admin Code</th><th className={tableHeadClass}>Administrator</th><th className={tableHeadClass}>Period Registrations</th><th className={tableHeadClass}>Period Top-ups</th><th className={tableHeadClass}>Top-up Value</th><th className={tableHeadClass}>Period Withdrawals</th><th className={tableHeadClass}>Withdrawal Value</th></tr></thead><tbody>{dailyAdminStats.map((stat) => <tr key={stat.adminId} className="bg-white hover:bg-orange-50/30"><td className={tableCellClass}><span className="rounded-lg bg-shopee-50 px-2.5 py-1.5 font-black text-shopee-600">{stat.adminCode || "—"}</span></td><td className={tableCellClass}><span className="font-black text-slate-900">{stat.displayName}</span></td><td className={tableCellClass}><span className="font-black text-slate-900">{stat.registrations}</span></td><td className={tableCellClass}><span className="font-black text-slate-900">{stat.topupCount}</span></td><td className={tableCellClass}><span className="font-black text-emerald-600">{money(stat.topupAmount)}</span></td><td className={tableCellClass}><span className="font-black text-slate-900">{stat.withdrawalCount}</span></td><td className={tableCellClass}><span className="font-black text-sky-600">{money(stat.withdrawalAmount)}</span></td></tr>)}{!dailyAdminStats.length && <tr><td colSpan={7} className="px-6 py-12 text-center text-sm font-bold text-slate-400">No administrator activity is available.</td></tr>}</tbody></table></div></Card>}
-    <div className="mt-5 grid gap-5 xl:grid-cols-2"><Card className="overflow-hidden"><SectionTitle title="Latest requests" subtitle="Top-ups and withdrawals that need attention" /><div className="divide-y divide-slate-100">{transactions.slice(0, 6).map((item) => <div key={item.id} className="flex items-center gap-3 p-4"><span className={`grid h-10 w-10 place-items-center rounded-xl ${item.type === "TOPUP" ? "bg-shopee-50 text-shopee-500" : "bg-sky-50 text-sky-600"}`}>{item.type === "TOPUP" ? <BadgeDollarSign size={19} /> : <Banknote size={19} />}</span><div className="min-w-0 flex-1"><p className="truncate text-sm font-black">{item.user?.displayName} · {item.type}</p><p className="text-xs font-semibold text-slate-400">{money(item.amount)}</p></div><StatusPill status={item.status} /></div>)}</div></Card><Card className="overflow-hidden"><SectionTitle title="Task activity" subtitle="Latest customer task statuses" /><div className="divide-y divide-slate-100">{orders.slice(0, 6).map((item) => <div key={item.id} className="flex items-center gap-3 p-4"><span className="grid h-10 w-10 place-items-center rounded-xl bg-violet-50 text-violet-600"><PackageCheck size={19} /></span><div className="min-w-0 flex-1"><p className="truncate text-sm font-black">{item.user?.displayName} · {item.items[0]?.productName || "Waiting for product"}</p><p className="text-xs font-semibold text-slate-400">{item.referenceNumber}</p></div><StatusPill status={item.status} /></div>)}</div></Card></div></>;
+  const reportDataClass = overviewLoading ? "opacity-40 transition-opacity" : "transition-opacity";
+
+  return <>
+    <div className="mt-6 grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
+      <Metric icon={<Users />} label="Total members" value={String(members)} tone="orange" />
+      <Metric icon={<WalletCards />} label="Total balance" value={money(totalBalance)} tone="green" />
+      <Metric icon={<Banknote />} label="Finance requests" value={String(pendingTopups + pendingWithdrawals)} tone="blue" />
+      <Metric icon={<ClipboardList />} label="Tasks awaiting assignment" value={String(pendingTasks)} tone="purple" />
+    </div>
+
+    {showAdminPerformance && <Card className="mt-5 overflow-hidden" aria-busy={overviewLoading}>
+      <div className="border-b border-slate-100 p-5">
+        <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
+          <div>
+            <p className="text-[10px] font-black uppercase tracking-[.15em] text-shopee-500">{periodLabel} performance</p>
+            <h2 className="mt-1 text-lg font-black text-slate-900">Administrator activity summary</h2>
+            <p className="mt-1 text-xs font-semibold text-slate-400">Registrations, approved top-ups, and withdrawals for the selected period.</p>
+          </div>
+          <div className="grid gap-2 sm:grid-cols-2">
+            <label className="grid gap-1 text-[10px] font-black uppercase tracking-wide text-slate-500"><span>View period</span>
+              <select className="h-10 min-w-[150px] rounded-xl border border-slate-200 bg-white px-3 text-sm font-bold normal-case tracking-normal text-slate-800 outline-none transition focus:border-shopee-400" value={overviewPeriod} onChange={(event) => onOverviewPeriodChange(event.target.value as OverviewPeriod)}>
+                <option value="daily">Daily</option><option value="weekly">Weekly</option><option value="monthly">Monthly</option><option value="yearly">Yearly</option>
+              </select>
+            </label>
+            <label className="grid gap-1 text-[10px] font-black uppercase tracking-wide text-slate-500"><span>Administrator</span>
+              <select className="h-10 min-w-[210px] rounded-xl border border-slate-200 bg-white px-3 text-sm font-bold normal-case tracking-normal text-slate-800 outline-none transition focus:border-shopee-400" value={overviewAdminId} onChange={(event) => onOverviewAdminChange(event.target.value)}>
+                <option value="">All administrators</option>{administrators.map((administrator) => <option key={administrator.id} value={administrator.id}>{administrator.adminCode || "No code"} — {administrator.displayName}</option>)}
+              </select>
+            </label>
+          </div>
+        </div>
+        <div className="mt-4 min-h-7" aria-live="polite">
+          {overviewLoading ? <span className="inline-flex items-center gap-2 rounded-full bg-sky-50 px-3 py-1.5 text-[10px] font-black uppercase tracking-wide text-sky-700"><RefreshCw size={12} className="animate-spin" /> Loading {periodLabel} report…</span> : dailyStatsDate && <span className="inline-flex rounded-full bg-orange-50 px-3 py-1.5 text-[10px] font-black uppercase tracking-wide text-shopee-600">{dailyStatsDate} · WIB</span>}
+          {overviewError && <p role="alert" className="mt-2 text-xs font-bold text-rose-600">{overviewError}</p>}
+        </div>
+      </div>
+      <div className={`grid gap-3 p-4 md:hidden ${reportDataClass}`}>
+        {dailyAdminStats.map((stat) => <article key={stat.adminId} className="rounded-2xl border border-slate-100 bg-slate-50 p-4"><div className="flex items-center justify-between gap-3"><div><p className="font-black text-slate-900">{stat.displayName}</p><p className="mt-1 text-[10px] font-black uppercase tracking-wide text-shopee-500">{stat.adminCode || "No admin code"}</p></div><span className="rounded-xl bg-white px-3 py-2 text-center"><span className="block text-lg font-black text-slate-900">{stat.registrations}</span><span className="text-[9px] font-black uppercase text-slate-400">Members</span></span></div><div className="mt-4 grid grid-cols-2 gap-3"><DailyFinanceMetric label="Top-ups" count={stat.topupCount} amount={stat.topupAmount} /><DailyFinanceMetric label="Withdrawals" count={stat.withdrawalCount} amount={stat.withdrawalAmount} /></div></article>)}
+        {!dailyAdminStats.length && <p className="py-8 text-center text-sm font-bold text-slate-400">No administrator activity is available.</p>}
+      </div>
+      <div className={`hidden overflow-x-auto md:block ${reportDataClass}`}>
+        <table className="w-full min-w-[850px]"><thead><tr><th className={tableHeadClass}>Admin Code</th><th className={tableHeadClass}>Administrator</th><th className={tableHeadClass}>Period Registrations</th><th className={tableHeadClass}>Period Top-ups</th><th className={tableHeadClass}>Top-up Value</th><th className={tableHeadClass}>Period Withdrawals</th><th className={tableHeadClass}>Withdrawal Value</th></tr></thead><tbody>{dailyAdminStats.map((stat) => <tr key={stat.adminId} className="bg-white hover:bg-orange-50/30"><td className={tableCellClass}><span className="rounded-lg bg-shopee-50 px-2.5 py-1.5 font-black text-shopee-600">{stat.adminCode || "—"}</span></td><td className={tableCellClass}><span className="font-black text-slate-900">{stat.displayName}</span></td><td className={tableCellClass}><span className="font-black text-slate-900">{stat.registrations}</span></td><td className={tableCellClass}><span className="font-black text-slate-900">{stat.topupCount}</span></td><td className={tableCellClass}><span className="font-black text-emerald-600">{money(stat.topupAmount)}</span></td><td className={tableCellClass}><span className="font-black text-slate-900">{stat.withdrawalCount}</span></td><td className={tableCellClass}><span className="font-black text-sky-600">{money(stat.withdrawalAmount)}</span></td></tr>)}{!dailyAdminStats.length && <tr><td colSpan={7} className="px-6 py-12 text-center text-sm font-bold text-slate-400">No administrator activity is available.</td></tr>}</tbody></table>
+      </div>
+    </Card>}
+
+    <div className="mt-5 grid gap-5 xl:grid-cols-2">
+      <Card className="overflow-hidden"><SectionTitle title="Latest requests" subtitle="Top-ups and withdrawals that need attention" /><div className="divide-y divide-slate-100">{transactions.slice(0, 6).map((item) => <div key={item.id} className="flex items-center gap-3 p-4"><span className={`grid h-10 w-10 place-items-center rounded-xl ${item.type === "TOPUP" ? "bg-shopee-50 text-shopee-500" : "bg-sky-50 text-sky-600"}`}>{item.type === "TOPUP" ? <BadgeDollarSign size={19} /> : <Banknote size={19} />}</span><div className="min-w-0 flex-1"><p className="truncate text-sm font-black">{item.user?.displayName} · {item.type}</p><p className="text-xs font-semibold text-slate-400">{money(item.amount)}</p></div><StatusPill status={item.status} /></div>)}</div></Card>
+      <Card className="overflow-hidden"><SectionTitle title="Task activity" subtitle="Latest customer task statuses" /><div className="divide-y divide-slate-100">{orders.slice(0, 6).map((item) => <div key={item.id} className="flex items-center gap-3 p-4"><span className="grid h-10 w-10 place-items-center rounded-xl bg-violet-50 text-violet-600"><PackageCheck size={19} /></span><div className="min-w-0 flex-1"><p className="truncate text-sm font-black">{item.user?.displayName} · {item.items[0]?.productName || "Waiting for product"}</p><p className="text-xs font-semibold text-slate-400">{item.referenceNumber}</p></div><StatusPill status={item.status} /></div>)}</div></Card>
+    </div>
+  </>;
 }
 
 function DailyFinanceMetric({ label, count, amount }: { label: string; count: number; amount: number }) {
@@ -945,7 +998,75 @@ function Topups({ transactions, phoneQuery, onPhoneQueryChange, scopePanel, canR
   const [viewing, setViewing] = useState<Transaction | null>(null);
   const transactionPagination = useTablePagination(transactions);
   const review = async (transaction: Transaction, status: "APPROVED" | "REJECTED") => { const succeeded = await perform(`/admin/transactions/${transaction.id}/review`, { status }, status === "APPROVED" ? "Top-up approved." : "Top-up rejected."); if (succeeded) setViewing(null); };
-  return <><Card className="mt-6 overflow-hidden"><div className="border-b border-slate-100 p-4"><p className="font-black text-slate-900">Top-up requests</p><p className="mt-1 text-xs font-semibold text-slate-400">{canReview ? "Review transfer evidence and approve or reject funding requests." : "Monitor top-up requests within your assigned member scope."}</p></div>{scopePanel}<PhoneSearchBox id="topup-phone-search" value={phoneQuery} onChange={onPhoneQueryChange} /><div className={tableScrollClass}><table className="w-full min-w-[1380px]"><caption className="sr-only">Top-up request management</caption><thead><tr>{["Code", "Admin Code", "User Phone", "Sender", "Amount", "Transfer Proof / Notes", "Payment Method", "Status"].map((label) => <th key={label} className={tableHeadClass}>{label}</th>)}<th className={`${tableHeadClass} right-0 !z-30 shadow-[-8px_0_16px_-16px_rgba(15,23,42,.7)]`}>Action</th></tr></thead><tbody>{transactionPagination.pageItems.map((transaction) => <tr key={transaction.id} className="group bg-white transition hover:bg-orange-50/30"><td className={tableCellClass}><p className="max-w-44 break-all font-black text-slate-900">{transaction.requestNumber}</p></td><td className={tableCellClass}><span className="font-black text-shopee-600">{transaction.user?.referrer?.adminCode || "—"}</span></td><td className={tableCellClass}><p className="font-black text-slate-900">{transaction.user?.phone || "No phone"}</p><p className="mt-1 text-[10px] font-semibold text-slate-400">{transaction.user?.displayName || "Unknown"}</p></td><td className={tableCellClass}><span className="font-black text-slate-900">{transaction.senderName || "Not provided"}</span></td><td className={tableCellClass}><span className="font-black text-shopee-600">{money(transaction.amount)}</span></td><td className={tableCellClass}>{transaction.proofPath ? <a href={`/api/admin/transactions/${transaction.id}/proof`} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 font-black text-shopee-500 hover:text-shopee-600"><ExternalLink size={14} /> View transfer proof</a> : <span className="text-slate-400">No proof or notes</span>}<p className="mt-1 max-w-52 truncate text-[10px] text-slate-400">{transaction.proofOriginalName}</p></td><td className={tableCellClass}><span className="font-black text-slate-900">Bank transfer</span></td><td className={tableCellClass}><StatusPill status={transaction.status} /></td><td className={`${tableCellClass} sticky right-0 bg-white shadow-[-8px_0_16px_-16px_rgba(15,23,42,.7)] group-hover:bg-orange-50/30`}><div className="flex justify-end gap-2"><Button variant="ghost" className="h-9 px-3 text-xs" onClick={() => setViewing(transaction)}><Eye size={14} /> View</Button>{canReview && transaction.status === "PENDING" && <><Button className="h-9 px-3 text-xs" onClick={() => review(transaction, "APPROVED")}>Approve</Button><Button variant="danger" className="h-9 px-3 text-xs" onClick={() => review(transaction, "REJECTED")}>Reject</Button></>}</div></td></tr>)}{!transactions.length && <tr><td colSpan={9} className="px-6 py-12 text-center text-sm font-bold text-slate-400">No top-up requests match the current search.</td></tr>}</tbody></table></div><TablePaginationControls pagination={transactionPagination} /></Card>{viewing && <Modal title="Top-up request details" onClose={() => setViewing(null)}><div className="grid gap-3"><StaffDetail label="Code" value={viewing.requestNumber} /><StaffDetail label="Admin code" value={viewing.user?.referrer?.adminCode || "Not linked"} /><StaffDetail label="Administrator" value={viewing.user?.referrer?.displayName || "Not linked"} /><StaffDetail label="User phone" value={viewing.user?.phone || "No phone"} /><StaffDetail label="Sender" value={viewing.senderName || "Not provided"} /><StaffDetail label="Amount" value={money(viewing.amount)} /><StaffDetail label="Payment method" value="Bank transfer" /><StaffDetail label="Submitted" value={dateTime(viewing.createdAt)} /></div>{viewing.proofPath && <a href={`/api/admin/transactions/${viewing.id}/proof`} target="_blank" rel="noreferrer" className="mt-4 flex h-11 items-center justify-center gap-2 rounded-2xl bg-slate-100 text-sm font-black text-slate-700"><ExternalLink size={16} /> Open transfer proof</a>}<div className="mt-6 flex flex-wrap justify-end gap-2"><Button variant="ghost" onClick={() => setViewing(null)}>Close</Button>{canReview && viewing.status === "PENDING" && <><Button onClick={() => review(viewing, "APPROVED")}>Approve</Button><Button variant="danger" onClick={() => review(viewing, "REJECTED")}>Reject</Button></>}</div></Modal>}</>;
+  return <>
+    <Card className="mt-6 overflow-hidden">
+      <div className="border-b border-slate-100 p-4">
+        <p className="font-black text-slate-900">Top-up requests</p>
+        <p className="mt-1 text-xs font-semibold text-slate-400">{canReview ? "Review transfer evidence and approve or reject funding requests." : "Monitor top-up requests within your assigned member scope."}</p>
+      </div>
+      {scopePanel}
+      <PhoneSearchBox id="topup-phone-search" value={phoneQuery} onChange={onPhoneQueryChange} />
+      <div className={tableScrollClass}>
+        <table className="w-full min-w-[1380px]">
+          <caption className="sr-only">Top-up request management</caption>
+          <thead><tr>{["Code", "Admin Code", "User Phone", "Sender", "Amount", "Transfer Proof / Notes", "Payment Method", "Status"].map((label) => <th key={label} className={tableHeadClass}>{label}</th>)}<th className={`${tableHeadClass} right-0 !z-30 shadow-[-8px_0_16px_-16px_rgba(15,23,42,.7)]`}>Action</th></tr></thead>
+          <tbody>
+            {transactionPagination.pageItems.map((transaction) => <tr key={transaction.id} className="group bg-white transition hover:bg-orange-50/30">
+              <td className={tableCellClass}><p className="max-w-44 break-all font-black text-slate-900">{transaction.requestNumber}</p></td>
+              <td className={tableCellClass}><span className="font-black text-shopee-600">{transaction.user?.referrer?.adminCode || "—"}</span></td>
+              <td className={tableCellClass}><p className="font-black text-slate-900">{transaction.user?.phone || "No phone"}</p><p className="mt-1 text-[10px] font-semibold text-slate-400">{transaction.user?.displayName || "Unknown"}</p></td>
+              <td className={tableCellClass}><span className="font-black text-slate-900">{transaction.senderName || "Not provided"}</span></td>
+              <td className={tableCellClass}><span className="font-black text-shopee-600">{money(transaction.amount)}</span></td>
+              <td className={tableCellClass}>{transaction.proofPath ? <a href={apiUrl(`/admin/transactions/${transaction.id}/proof`)} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 font-black text-shopee-500 hover:text-shopee-600"><ExternalLink size={14} /> View transfer proof</a> : <span className="text-slate-400">No proof or notes</span>}<p className="mt-1 max-w-52 truncate text-[10px] text-slate-400">{transaction.proofOriginalName}</p></td>
+              <td className={tableCellClass}><span className="font-black text-slate-900">Bank transfer</span></td>
+              <td className={tableCellClass}><StatusPill status={transaction.status} /></td>
+              <td className={`${tableCellClass} sticky right-0 bg-white shadow-[-8px_0_16px_-16px_rgba(15,23,42,.7)] group-hover:bg-orange-50/30`}><div className="flex justify-end gap-2"><Button variant="ghost" className="h-9 px-3 text-xs" onClick={() => setViewing(transaction)}><Eye size={14} /> View</Button>{canReview && transaction.status === "PENDING" && <><Button className="h-9 px-3 text-xs" onClick={() => review(transaction, "APPROVED")}>Approve</Button><Button variant="danger" className="h-9 px-3 text-xs" onClick={() => review(transaction, "REJECTED")}>Reject</Button></>}</div></td>
+            </tr>)}
+            {!transactions.length && <tr><td colSpan={9} className="px-6 py-12 text-center text-sm font-bold text-slate-400">No top-up requests match the current search.</td></tr>}
+          </tbody>
+        </table>
+      </div>
+      <TablePaginationControls pagination={transactionPagination} />
+    </Card>
+
+    {viewing && <Modal title="Top-up request details" onClose={() => setViewing(null)} wide>
+      <div className="grid gap-3 sm:grid-cols-2">
+        <StaffDetail label="Code" value={viewing.requestNumber} />
+        <StaffDetail label="Admin code" value={viewing.user?.referrer?.adminCode || "Not linked"} />
+        <StaffDetail label="Administrator" value={viewing.user?.referrer?.displayName || "Not linked"} />
+        <StaffDetail label="User phone" value={viewing.user?.phone || "No phone"} />
+        <StaffDetail label="Sender" value={viewing.senderName || "Not provided"} />
+        <StaffDetail label="Amount" value={money(viewing.amount)} />
+        <StaffDetail label="Payment method" value="Bank transfer" />
+        <StaffDetail label="Submitted" value={dateTime(viewing.createdAt)} />
+      </div>
+      {viewing.proofPath && <PaymentProofPreview key={viewing.id} transaction={viewing} />}
+      <div className="mt-6 flex flex-wrap justify-end gap-2">
+        <Button variant="ghost" onClick={() => setViewing(null)}>Close</Button>
+        {canReview && viewing.status === "PENDING" && <><Button onClick={() => review(viewing, "APPROVED")}>Approve</Button><Button variant="danger" onClick={() => review(viewing, "REJECTED")}>Reject</Button></>}
+      </div>
+    </Modal>}
+  </>;
+}
+
+function PaymentProofPreview({ transaction }: { transaction: Transaction }) {
+  const [unavailable, setUnavailable] = useState(false);
+  const proofUrl = apiUrl(`/admin/transactions/${transaction.id}/proof`);
+
+  return <section className="mt-4 overflow-hidden rounded-2xl border border-slate-200 bg-slate-50" aria-label="Payment proof preview">
+    <div className="flex flex-wrap items-center justify-between gap-2 border-b border-slate-200 bg-white px-4 py-3">
+      <div className="min-w-0">
+        <p className="text-[10px] font-black uppercase tracking-wide text-slate-400">Payment proof</p>
+        <p className="mt-1 truncate text-xs font-bold text-slate-600">{transaction.proofOriginalName || "Uploaded image"}</p>
+      </div>
+      {!unavailable && <a href={proofUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 rounded-xl bg-slate-100 px-3 py-2 text-xs font-black text-slate-700 transition hover:bg-slate-200"><ExternalLink size={14} /> Open full size</a>}
+    </div>
+    {unavailable ? <div role="status" className="grid min-h-44 place-items-center px-5 py-8 text-center">
+      <div><AlertTriangle size={28} className="mx-auto text-amber-500" /><p className="mt-3 text-sm font-black text-slate-700">Payment proof unavailable</p><p className="mt-1 max-w-sm text-xs font-semibold leading-5 text-slate-500">The request record exists, but its original image file is no longer stored on this server.</p></div>
+    </div> : <a href={proofUrl} target="_blank" rel="noreferrer" className="block bg-slate-100 p-3" aria-label="Open payment proof at full size">
+      <img src={proofUrl} alt={`Payment proof for ${transaction.requestNumber}`} onError={() => setUnavailable(true)} className="mx-auto max-h-80 w-full rounded-xl bg-white object-contain shadow-sm" />
+    </a>}
+  </section>;
 }
 
 function Withdrawals({ transactions, phoneQuery, onPhoneQueryChange, scopePanel, canReview, perform }: { transactions: Transaction[]; phoneQuery: string; onPhoneQueryChange: (value: string) => void; scopePanel?: React.ReactNode; canReview: boolean; perform: (path: string, body: unknown, success: string) => Promise<boolean> }) {
@@ -1334,5 +1455,5 @@ function Modal({ title, onClose, children, wide = false }: { title: string; onCl
     document.addEventListener("keydown", closeOnEscape);
     return () => { document.removeEventListener("keydown", closeOnEscape); document.body.style.overflow = previousOverflow; previousFocus?.focus(); };
   }, []);
-  return <div className="fixed inset-0 z-[70] grid place-items-end bg-slate-950/55 p-0 sm:place-items-center sm:p-3"><div ref={panelRef} tabIndex={-1} role="dialog" aria-modal="true" aria-label={title} className={`max-h-[calc(100dvh-.5rem)] w-full overflow-y-auto rounded-t-3xl bg-white p-4 shadow-2xl outline-none sm:max-h-[calc(100dvh-1.5rem)] sm:rounded-3xl sm:p-6 ${wide ? "max-w-2xl" : "max-w-md"}`}><div className="mb-4 flex items-start justify-between gap-3 sm:mb-5 sm:items-center"><h2 className="min-w-0 break-words text-lg font-black sm:text-xl">{title}</h2><button type="button" onClick={onClose} aria-label="Close dialog" className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-slate-100"><X size={18} /></button></div>{children}</div></div>;
+  return <div className="fixed inset-0 z-[70] grid place-items-end bg-slate-950/55 p-0 sm:place-items-center sm:p-3"><div ref={panelRef} tabIndex={-1} role="dialog" aria-modal="true" aria-label={title} className={`scrollbar-hidden max-h-[calc(100dvh-.5rem)] w-full overflow-y-auto rounded-t-3xl bg-white p-4 shadow-2xl outline-none sm:max-h-[calc(100dvh-1.5rem)] sm:rounded-3xl sm:p-6 ${wide ? "max-w-2xl" : "max-w-md"}`}><div className="mb-4 flex items-start justify-between gap-3 sm:mb-5 sm:items-center"><h2 className="min-w-0 break-words text-lg font-black sm:text-xl">{title}</h2><button type="button" onClick={onClose} aria-label="Close dialog" className="grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-slate-100"><X size={18} /></button></div>{children}</div></div>;
 }

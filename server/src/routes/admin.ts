@@ -1,5 +1,4 @@
 import { Router } from "express";
-import path from "node:path";
 import bcrypt from "bcryptjs";
 import { OrderStatus, Prisma, TransactionStatus, TransactionType, UserLevel, UserRole } from "@prisma/client";
 import { z } from "zod";
@@ -7,6 +6,7 @@ import { authenticateAdmin, type AuthRequest, requireRole } from "../middleware/
 import { calculateCommission } from "../lib/commission.js";
 import { prisma } from "../lib/prisma.js";
 import { asyncHandler, HttpError, jsonSafe, requestNumber } from "../lib/http.js";
+import { inlineFileName, legacyPaymentProofPath, missingPaymentProofPage } from "../lib/proof-storage.js";
 import {
   rewardMilestoneTasks,
   rewardSettingKeys,
@@ -997,13 +997,42 @@ router.get(
   asyncHandler(async (request: AuthRequest, response) => {
     const transaction = await prisma.transaction.findUnique({
       where: { id: String(request.params.id) },
-      include: { user: { select: { referrerId: true } } },
+      include: {
+        user: { select: { referrerId: true } },
+        proofFile: { select: { mimeType: true, data: true } },
+      },
     });
     if (!transaction?.proofPath) throw new HttpError(404, "Payment proof not found.");
     if (request.auth!.role !== UserRole.SUPER_ADMIN && transaction.user.referrerId !== request.auth!.id) {
       throw new HttpError(403, "This payment proof is outside your member scope.");
     }
-    response.sendFile(path.resolve("uploads", transaction.proofPath));
+    if (transaction.proofFile) {
+      return response
+        .set({
+          "Cache-Control": "private, max-age=300",
+          "Content-Disposition": `inline; filename*=UTF-8''${inlineFileName(transaction.proofOriginalName || "payment-proof")}`,
+        })
+        .type(transaction.proofFile.mimeType)
+        .send(Buffer.from(transaction.proofFile.data));
+    }
+
+    const legacyProofPath = legacyPaymentProofPath(transaction.proofPath);
+    if (!legacyProofPath) {
+      if ((request.get("accept") || "").includes("text/html")) {
+        return response
+          .status(404)
+          .set("Cache-Control", "no-store")
+          .type("html")
+          .send(missingPaymentProofPage());
+      }
+      throw new HttpError(404, "The original payment proof file is no longer available. Ask the member to submit it again.");
+    }
+    return response
+      .set({
+        "Cache-Control": "private, max-age=300",
+        "Content-Disposition": `inline; filename*=UTF-8''${inlineFileName(transaction.proofOriginalName || "payment-proof")}`,
+      })
+      .sendFile(legacyProofPath);
   }),
 );
 

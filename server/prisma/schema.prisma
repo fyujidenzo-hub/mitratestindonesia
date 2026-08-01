@@ -175,10 +175,20 @@ model Transaction {
 
   user     User  @relation("CustomerTransactions", fields: [userId], references: [id], onDelete: Restrict)
   reviewer User? @relation("ReviewerTransactions", fields: [reviewerId], references: [id], onDelete: SetNull)
+  proofFile TransactionProof?
 
   @@index([userId, createdAt])
   @@index([status, type, createdAt])
   @@index([createdAt], map: "Transaction_createdAt_idx")
+}
+
+model TransactionProof {
+  id            String      @id @default(cuid())
+  transactionId String      @unique
+  mimeType      String      @db.VarChar(100)
+  data          Bytes       @db.ByteA
+  createdAt     DateTime    @default(now())
+  transaction   Transaction @relation(fields: [transactionId], references: [id], onDelete: Cascade)
 }
 
 model Order {
