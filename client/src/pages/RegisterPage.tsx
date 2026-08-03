@@ -1,6 +1,7 @@
 import { ArrowLeft, BadgeCheck, Gift, TicketCheck } from "lucide-react";
 import { useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
+import { AuthBackground } from "../components/AuthBackground";
 import { Brand } from "../components/Brand";
 import { Button, Field, inputClass, Notice } from "../components/Ui";
 import { api } from "../lib/api";
@@ -31,10 +32,8 @@ export default function RegisterPage() {
   };
 
   return (
-    <main
-      className="relative min-h-screen bg-[#ead8ca] bg-cover bg-center lg:p-6"
-      style={{ backgroundImage: "url('/assets/auth-background-hd.png')" }}
-    >
+    <main className="auth-page relative min-h-screen bg-[#ead8ca] lg:p-6">
+      <AuthBackground />
       <div className="relative mx-auto min-h-screen max-w-[1500px] lg:min-h-[calc(100vh-48px)]">
         <header className="relative z-20 flex h-[68px] items-center justify-between border-b border-white/70 bg-white/[.97] px-2 sm:h-[72px] sm:px-6 lg:mx-7 lg:mt-7 lg:rounded-[22px] lg:border">
           <Brand compact />

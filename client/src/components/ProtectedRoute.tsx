@@ -7,5 +7,5 @@ export function ProtectedRoute({ roles }: { roles?: UserRole[] }) {
   if (loading) return <div className="grid min-h-screen place-items-center bg-transparent"><div className="h-11 w-11 animate-spin rounded-full border-4 border-shopee-100 border-t-shopee-500" /></div>;
   if (!user) return <Navigate to="/login" replace />;
   if (roles && !roles.includes(user.role)) return <Navigate to={user.role === "CUSTOMER" ? "/" : "/admin"} replace />;
-  return <Outlet />;
+  return <div className="app-shell min-h-screen"><Outlet /></div>;
 }

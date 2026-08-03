@@ -76,7 +76,8 @@
 html { min-height: 100%; scroll-behavior: smooth; background: #fff8f3; }
 body { margin: 0; min-width: 320px; min-height: 100vh; background: transparent; font-family: Inter, ui-sans-serif, system-ui, sans-serif; -webkit-font-smoothing: antialiased; }
 #root { position: relative; isolation: isolate; min-height: 100vh; }
-#root::before {
+.app-shell { position: relative; isolation: isolate; min-height: 100vh; }
+.app-shell::before {
   position: fixed;
   inset: 0 0 0 auto;
   width: min(72vw, 1320px);
@@ -87,7 +88,7 @@ body { margin: 0; min-width: 320px; min-height: 100vh; background: transparent; 
   opacity: 0.78;
   transform: translateZ(0);
 }
-#root::after {
+.app-shell::after {
   position: fixed;
   inset: 0;
   z-index: -1;
@@ -112,7 +113,7 @@ button, a { -webkit-tap-highlight-color: transparent; }
 }
 
 @media (max-width: 767px) {
-  #root::before {
+  .app-shell::before {
     inset: 0 0 auto auto;
     width: 92vw;
     height: 46svh;
@@ -122,7 +123,7 @@ button, a { -webkit-tap-highlight-color: transparent; }
     opacity: 0.62;
   }
 
-  #root::after {
+  .app-shell::after {
     background:
       linear-gradient(90deg, #fff8f3 0%, rgba(255, 248, 243, 0.9) 25%, rgba(255, 248, 243, 0.24) 100%),
       linear-gradient(180deg, rgba(255, 248, 243, 0.08) 0%, rgba(255, 248, 243, 0.42) 25svh, #fff8f3 45svh, #fff8f3 100%);
