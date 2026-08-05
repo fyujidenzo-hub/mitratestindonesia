@@ -473,6 +473,17 @@ router.get(
   }),
 );
 
+router.post(
+  "/overview/metrics/refresh",
+  asyncHandler(async (request: AuthRequest, response) => {
+    response.setHeader("Cache-Control", "private, no-store, no-cache, must-revalidate");
+    response.setHeader("Pragma", "no-cache");
+    response.setHeader("Expires", "0");
+    const metrics = await overviewMetricSnapshot(request);
+    response.json(jsonSafe({ metrics, refreshedAt: new Date() }));
+  }),
+);
+
 router.get(
   "/overview/live",
   asyncHandler(async (request: AuthRequest, response) => {
