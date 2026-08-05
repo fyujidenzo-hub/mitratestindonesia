@@ -157,22 +157,10 @@ export default function AdminPage() {
   }, [loadLiveOverview, loadOverviewMetrics, tab]);
   const visibleTabs = tabs.filter((item) => !item.superOnly || user?.role === "SUPER_ADMIN");
   const say = (value: string, nextTone: "success" | "error" = "success") => { setTone(nextTone); setMessage(value); };
-  const refreshAdminData = async () => {
+  const refreshAdminData = () => {
     if (refreshing) return;
     setRefreshing(true);
-    setMessage("");
-    try {
-      const results = await Promise.all([
-        load("manual"),
-        tab === "overview" ? loadOverviewMetrics() : Promise.resolve(null),
-        tab === "overview" ? loadLiveOverview({ force: true }) : Promise.resolve(null),
-      ]);
-      const refreshError = results.find((result): result is string => Boolean(result));
-      if (refreshError) say(refreshError, "error");
-      else say("Admin data refreshed.");
-    } finally {
-      setRefreshing(false);
-    }
+    window.location.reload();
   };
   const perform = async (path: string, body: unknown, success: string, method = "POST") => { try { await api(path, { method, body: JSON.stringify(body) }); say(success); await load("mutation"); if (tab === "overview") void loadLiveOverview(); return true; } catch (error) { say(error instanceof Error ? error.message : "Action failed.", "error"); return false; } };
 
@@ -209,7 +197,7 @@ export default function AdminPage() {
     <div className="flex"><aside className={`${menuOpen ? "fixed inset-0 z-50 flex" : "hidden"} w-full bg-slate-950/50 lg:sticky lg:top-16 lg:flex lg:h-[calc(100vh-4rem)] lg:w-64 lg:bg-transparent`}><div className="h-full w-72 bg-slate-950 p-4 text-white lg:w-full"><div className="mb-5 flex items-center justify-between lg:hidden"><Brand inverse compact /><button aria-label="Close navigation" onClick={() => setMenuOpen(false)}><X /></button></div><nav className="grid gap-1.5">{visibleTabs.map(({ key, label, icon: Icon }) => <button key={key} onClick={() => { setTab(key); setMenuOpen(false); }} className={`flex items-center gap-3 rounded-2xl px-4 py-3 text-left text-sm font-black transition ${tab === key ? "bg-gradient-to-r from-shopee-500 to-orange-500 text-white shadow-lg" : "text-slate-400 hover:bg-white/5 hover:text-white"}`}><Icon size={19} />{t(label)}<ChevronRight size={15} className="ml-auto opacity-40" /></button>)}</nav><div className="mt-6 rounded-2xl border border-white/10 bg-white/5 p-4"><p className="text-[10px] font-black uppercase tracking-[.16em] text-slate-500">{t("Invitation code")}</p><p className="mt-2 text-xl font-black text-white">{user?.invitationCode || "-"}</p><p className="mt-1 text-xs font-semibold text-slate-500">Bonus {money(user?.registrationBonus ?? 0)}</p></div></div><button aria-label="Close navigation overlay" className="flex-1 lg:hidden" onClick={() => setMenuOpen(false)} /></aside>
       <main className="min-w-0 flex-1 p-4 sm:p-6 lg:p-8"><div className="mx-auto max-w-[1680px]"><div><p className="text-xs font-black uppercase tracking-[.18em] text-shopee-500">Admin command center</p><h1 className="mt-1 text-2xl font-black tracking-tight sm:text-3xl">{t(visibleTabs.find((item) => item.key === tab)?.label ?? "Overview")}</h1></div>
         {!["members", "tasks", "topups", "withdrawals"].includes(tab) && <div className="relative mt-5 md:hidden"><Search size={17} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" /><input value={query} onChange={(e) => setQuery(e.target.value)} className={`${inputClass} pl-10`} placeholder={t("Search data")} /></div>}
-        <div className="mt-4 flex items-center justify-end gap-2">{tab === "overview" && <span className="hidden items-center gap-2 rounded-full border border-emerald-100 bg-emerald-50 px-3 py-2 text-[10px] font-black uppercase tracking-wide text-emerald-700 sm:inline-flex"><span className="h-2 w-2 animate-pulse rounded-full bg-emerald-500" /> Live data</span>}<Button variant="ghost" loading={refreshing} onClick={() => { void refreshAdminData(); }}><RefreshCw size={17} /> {t("Refresh data")}</Button></div>{message && <div className="mt-5"><Notice message={message} tone={tone} onClose={() => setMessage("")} /></div>}
+        <div className="mt-4 flex items-center justify-start gap-2">{tab === "overview" && <span className="hidden items-center gap-2 rounded-full border border-emerald-100 bg-emerald-50 px-3 py-2 text-[10px] font-black uppercase tracking-wide text-emerald-700 sm:inline-flex"><span className="h-2 w-2 animate-pulse rounded-full bg-emerald-500" /> Live data</span>}<Button variant="ghost" loading={refreshing} onClick={refreshAdminData}><RefreshCw size={17} /> {t("Refresh data")}</Button></div>{message && <div className="mt-5"><Notice message={message} tone={tone} onClose={() => setMessage("")} /></div>}
         {tab === "overview" ? (liveOverview || data ? <Overview members={currentOverviewMetrics?.members ?? data?.members.length ?? 0} totalBalance={currentOverviewMetrics?.totalBalance ?? totalBalance} financeRequests={overviewFinanceRequests} pendingTasks={currentOverviewMetrics?.tasksAwaitingAssignment ?? pendingTasks} transactions={liveOverview?.latestTransactions ?? data?.transactions ?? []} orders={liveOverview?.latestOrders ?? data?.orders ?? []} dailyAdminStats={selectedOverviewReport?.dailyAdminStats ?? []} dailyStatsDate={selectedOverviewReport?.statsRangeLabel ?? ""} administrators={liveOverview?.administrators ?? data?.staff ?? []} overviewPeriod={overviewPeriod} overviewAdminId={overviewAdminId} overviewLoading={overviewLoading || !selectedOverviewReport} overviewError={overviewError} metricsRefreshing={refreshing} onOverviewPeriodChange={(value) => { setLoadedOverviewKey(""); setOverviewLoading(true); setOverviewPeriod(value); }} onOverviewAdminChange={(value) => { setLoadedOverviewKey(""); setOverviewLoading(true); setOverviewAdminId(value); }} showAdminPerformance={user?.role === "SUPER_ADMIN"} /> : <AdminDataSkeleton />) : !data ? <AdminDataSkeleton /> : <>
           {tab === "members" && <Members members={filteredMembers} orders={data.orders} adminFilterId={selectedAdminId} scopePanel={adminScopePanel} canManage={user?.role === "SUPER_ADMIN"} canManageSecurity={user?.role === "SUPER_ADMIN" || user?.role === "ADMIN"} canManageWithdrawals={user?.role === "SUPER_ADMIN" || user?.role === "ADMIN"} perform={perform} />}
           {tab === "tasks" && <Tasks orders={filteredOrders} products={data.taskProducts} phoneQuery={phoneQuery} onPhoneQueryChange={setPhoneQuery} scopePanel={adminScopePanel} perform={perform} />}
