@@ -329,6 +329,45 @@ async function orderTaskSequences(orderIds: string[]) {
   return new Map(rows.map((row) => [row.id, Number(row.taskSequence)]));
 }
 
+async function overviewMetricSnapshot(request: AuthRequest) {
+  const isSuperAdmin = request.auth!.role === UserRole.SUPER_ADMIN;
+  const userFilter: Prisma.UserWhereInput = isSuperAdmin
+    ? { role: UserRole.CUSTOMER }
+    : { role: UserRole.CUSTOMER, referrerId: request.auth!.id };
+  const transactionFilter: Prisma.TransactionWhereInput = isSuperAdmin
+    ? {}
+    : { user: { referrerId: request.auth!.id } };
+  const orderFilter: Prisma.OrderWhereInput = isSuperAdmin
+    ? {}
+    : { user: { referrerId: request.auth!.id } };
+
+  const [memberTotals, pendingTopups, pendingWithdrawals, pendingTasks] = await Promise.all([
+    prisma.user.aggregate({
+      where: userFilter,
+      _count: { _all: true },
+      _sum: { balance: true },
+    }),
+    prisma.transaction.count({
+      where: { ...transactionFilter, type: TransactionType.TOPUP, status: TransactionStatus.PENDING },
+    }),
+    prisma.transaction.count({
+      where: { ...transactionFilter, type: TransactionType.WITHDRAWAL, status: TransactionStatus.PENDING },
+    }),
+    prisma.order.count({
+      where: { ...orderFilter, status: OrderStatus.WAITING_ASSIGNMENT },
+    }),
+  ]);
+
+  return {
+    members: memberTotals._count._all,
+    totalBalance: memberTotals._sum.balance ?? 0n,
+    financeRequests: pendingTopups + pendingWithdrawals,
+    pendingTopups,
+    pendingWithdrawals,
+    tasksAwaitingAssignment: pendingTasks,
+  };
+}
+
 router.use(authenticateAdmin, requireRole(...staffRoles));
 router.use(asyncHandler(async (request: AuthRequest, _response, next) => {
   const activeStaff = await prisma.user.findUnique({
@@ -424,6 +463,17 @@ router.get(
 );
 
 router.get(
+  "/overview/metrics",
+  asyncHandler(async (request: AuthRequest, response) => {
+    response.setHeader("Cache-Control", "private, no-store, no-cache, must-revalidate");
+    response.setHeader("Pragma", "no-cache");
+    response.setHeader("Expires", "0");
+    const metrics = await overviewMetricSnapshot(request);
+    response.json(jsonSafe({ metrics, refreshedAt: new Date() }));
+  }),
+);
+
+router.get(
   "/overview/live",
   asyncHandler(async (request: AuthRequest, response) => {
     response.setHeader("Cache-Control", "private, no-store");
@@ -432,9 +482,6 @@ router.get(
     // Only Super Admins can narrow the administrator activity report. Other
     // administrator roles continue to receive their own scoped dashboard.
     const reportAdminId = isSuperAdmin ? requestedAdminId : undefined;
-    const userFilter: Prisma.UserWhereInput = isSuperAdmin
-      ? { role: UserRole.CUSTOMER }
-      : { role: UserRole.CUSTOMER, referrerId: request.auth!.id };
     const transactionFilter: Prisma.TransactionWhereInput = isSuperAdmin
       ? {}
       : { user: { referrerId: request.auth!.id } };
@@ -444,32 +491,14 @@ router.get(
     const reportPeriod = jakartaPeriodBounds(period);
 
     const [
-      memberTotals,
-      pendingFinance,
-      pendingTasks,
+      metrics,
       latestTransactions,
       latestOrders,
       staff,
       dailyRegistrations,
       dailyFinancialRows,
     ] = await Promise.all([
-      prisma.user.aggregate({
-        where: userFilter,
-        _count: { _all: true },
-        _sum: { balance: true },
-      }),
-      prisma.transaction.groupBy({
-        by: ["type"],
-        where: {
-          ...transactionFilter,
-          type: { in: [TransactionType.TOPUP, TransactionType.WITHDRAWAL] },
-          status: TransactionStatus.PENDING,
-        },
-        _count: { _all: true },
-      }),
-      prisma.order.count({
-        where: { ...orderFilter, status: OrderStatus.WAITING_ASSIGNMENT },
-      }),
+      overviewMetricSnapshot(request),
       prisma.transaction.findMany({
         where: transactionFilter,
         select: {
@@ -522,9 +551,6 @@ router.get(
         : Promise.resolve([]),
     ]);
 
-    const pendingFinanceByType = new Map(
-      pendingFinance.map((row) => [row.type, row._count._all]),
-    );
     const registrationCounts = new Map(
       dailyRegistrations.map((row) => [row.referrerId, row._count._all]),
     );
@@ -548,18 +574,8 @@ router.get(
         withdrawalAmount: withdrawals?.totalAmount ?? 0n,
       };
     });
-    const pendingTopups = pendingFinanceByType.get(TransactionType.TOPUP) ?? 0;
-    const pendingWithdrawals = pendingFinanceByType.get(TransactionType.WITHDRAWAL) ?? 0;
-
     response.json(jsonSafe({
-      metrics: {
-        members: memberTotals._count._all,
-        totalBalance: memberTotals._sum.balance ?? 0n,
-        financeRequests: pendingTopups + pendingWithdrawals,
-        pendingTopups,
-        pendingWithdrawals,
-        tasksAwaitingAssignment: pendingTasks,
-      },
+      metrics,
       dailyAdminStats,
       dailyStatsDate: reportPeriod.label,
       statsPeriod: period,
