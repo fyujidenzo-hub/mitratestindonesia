@@ -47,7 +47,6 @@ export default function AdminPage() {
   const { t, language } = useI18n();
   const adminRootRef = useRef<HTMLDivElement>(null);
   const adminScopeInitializedRef = useRef(false);
-  const activeRequestsRef = useRef(0);
   const latestRequestRef = useRef(0);
   const dataFingerprintRef = useRef("");
   const liveRequestActiveRef = useRef(false);
@@ -57,22 +56,24 @@ export default function AdminPage() {
   const [data, setData] = useState<AdminData | null>(null); const [liveOverview, setLiveOverview] = useState<LiveOverviewData | null>(null); const [loadedOverviewKey, setLoadedOverviewKey] = useState(""); const [tab, setTab] = useState<Tab>("overview"); const [query, setQuery] = useState(""); const [phoneQuery, setPhoneQuery] = useState(""); const [selectedAdminId, setSelectedAdminId] = useState(""); const [overviewAdminId, setOverviewAdminId] = useState(""); const [overviewPeriod, setOverviewPeriod] = useState<OverviewPeriod>("daily"); const [overviewLoading, setOverviewLoading] = useState(false); const [overviewError, setOverviewError] = useState(""); const [menuOpen, setMenuOpen] = useState(false); const [message, setMessage] = useState(""); const [tone, setTone] = useState<"success" | "error">("success"); const [refreshing, setRefreshing] = useState(false);
   const load = useCallback(async (mode: "initial" | "manual" | "mutation" = "manual") => {
     const requestId = ++latestRequestRef.current;
-    activeRequestsRef.current += 1;
-    if (mode === "initial" || mode === "manual") setRefreshing(true);
     try {
-      const nextData = await api<AdminData>("/admin/overview");
-      if (requestId !== latestRequestRef.current) return;
+      const search = mode === "manual" ? `?_=${Date.now()}` : "";
+      const nextData = await api<AdminData>(`/admin/overview${search}`, mode === "manual" ? {
+        cache: "no-store",
+        headers: { "Cache-Control": "no-cache", Pragma: "no-cache" },
+      } : {});
+      if (requestId !== latestRequestRef.current) return null;
       const nextFingerprint = JSON.stringify(nextData);
       if (nextFingerprint !== dataFingerprintRef.current) {
         dataFingerprintRef.current = nextFingerprint;
         setData(nextData);
       }
+      return null;
     } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : "Unable to refresh administrator data.";
       setTone("error");
-      setMessage(error instanceof Error ? error.message : "Unable to refresh administrator data.");
-    } finally {
-      activeRequestsRef.current = Math.max(0, activeRequestsRef.current - 1);
-      if (mode === "initial" || mode === "manual") setRefreshing(false);
+      setMessage(errorMessage);
+      return errorMessage;
     }
   }, []);
   const loadLiveOverview = useCallback(async (options: { force?: boolean; period?: OverviewPeriod; adminId?: string } = {}) => {
@@ -81,7 +82,7 @@ export default function AdminPage() {
     const adminId = options.adminId ?? overviewAdminId;
     // A filter change must not wait for an older request already in progress.
     // Start a new request and discard the older response instead.
-    if (liveRequestActiveRef.current && !force) return;
+    if (liveRequestActiveRef.current && !force) return null;
     liveRequestActiveRef.current = true;
     const requestId = ++latestLiveRequestRef.current;
     const requestKey = `${period}:${adminId || "all"}`;
@@ -95,7 +96,7 @@ export default function AdminPage() {
         cache: "no-store",
         headers: { "Cache-Control": "no-cache", Pragma: "no-cache" },
       });
-      if (requestId !== latestLiveRequestRef.current) return;
+      if (requestId !== latestLiveRequestRef.current) return null;
       if (nextOverview.statsPeriod !== period) {
         throw new Error("The report server returned an outdated period. Please try again.");
       }
@@ -116,10 +117,13 @@ export default function AdminPage() {
       // Bind the response to the exact filter that requested it. This keeps a
       // previous report from being displayed under a newly selected label.
       setLoadedOverviewKey(requestKey);
+      return null;
     } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : "Unable to load the selected report.";
       if (requestId === latestLiveRequestRef.current) {
-        setOverviewError(error instanceof Error ? error.message : "Unable to load the selected report.");
+        setOverviewError(errorMessage);
       }
+      return errorMessage;
     } finally {
       if (requestId === latestLiveRequestRef.current) {
         liveRequestActiveRef.current = false;
@@ -134,6 +138,22 @@ export default function AdminPage() {
   }, [loadLiveOverview, tab]);
   const visibleTabs = tabs.filter((item) => !item.superOnly || user?.role === "SUPER_ADMIN");
   const say = (value: string, nextTone: "success" | "error" = "success") => { setTone(nextTone); setMessage(value); };
+  const refreshAdminData = async () => {
+    if (refreshing) return;
+    setRefreshing(true);
+    setMessage("");
+    try {
+      const results = await Promise.all([
+        load("manual"),
+        tab === "overview" ? loadLiveOverview({ force: true }) : Promise.resolve(null),
+      ]);
+      const refreshError = results.find((result): result is string => Boolean(result));
+      if (refreshError) say(refreshError, "error");
+      else say("Admin data refreshed.");
+    } finally {
+      setRefreshing(false);
+    }
+  };
   const perform = async (path: string, body: unknown, success: string, method = "POST") => { try { await api(path, { method, body: JSON.stringify(body) }); say(success); await load("mutation"); if (tab === "overview") void loadLiveOverview(); return true; } catch (error) { say(error instanceof Error ? error.message : "Action failed.", "error"); return false; } };
 
   useEffect(() => {
@@ -165,8 +185,9 @@ export default function AdminPage() {
 
   return <div ref={adminRootRef} className="min-h-screen bg-transparent text-slate-900"><header className="sticky top-0 z-40 border-b border-white/70 bg-white/[.97] shadow-[0_10px_35px_rgba(124,45,18,.08)]"><div className="flex h-16 items-center gap-3 px-4 lg:px-6"><button aria-label="Open navigation" className="grid h-10 w-10 place-items-center rounded-xl bg-slate-100 lg:hidden" onClick={() => setMenuOpen(true)}><Menu /></button><Brand compact /><div className="relative ml-auto hidden w-full max-w-md md:block"><Search size={17} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" /><input value={query} onChange={(e) => setQuery(e.target.value)} className="h-10 w-full rounded-xl border border-slate-200 bg-slate-50 pl-10 pr-4 text-sm font-semibold outline-none focus:border-shopee-300" placeholder={t("Search members, orders, and transactions")} /></div><div className="ml-auto flex items-center gap-3 md:ml-0"><LanguageSwitcher compact /><div className="hidden text-right sm:block"><p className="text-sm font-black">{user?.displayName}</p><p className="text-[10px] font-black uppercase tracking-wide text-shopee-500">{user?.role.replace("_", " ")}</p></div><button aria-label={t("Sign out")} onClick={async () => { await logout("admin"); navigate("/admin"); }} className="grid h-10 w-10 place-items-center rounded-xl bg-slate-100 text-slate-600 hover:bg-rose-50 hover:text-rose-600"><LogOut size={18} /></button></div></div></header>
     <div className="flex"><aside className={`${menuOpen ? "fixed inset-0 z-50 flex" : "hidden"} w-full bg-slate-950/50 lg:sticky lg:top-16 lg:flex lg:h-[calc(100vh-4rem)] lg:w-64 lg:bg-transparent`}><div className="h-full w-72 bg-slate-950 p-4 text-white lg:w-full"><div className="mb-5 flex items-center justify-between lg:hidden"><Brand inverse compact /><button aria-label="Close navigation" onClick={() => setMenuOpen(false)}><X /></button></div><nav className="grid gap-1.5">{visibleTabs.map(({ key, label, icon: Icon }) => <button key={key} onClick={() => { setTab(key); setMenuOpen(false); }} className={`flex items-center gap-3 rounded-2xl px-4 py-3 text-left text-sm font-black transition ${tab === key ? "bg-gradient-to-r from-shopee-500 to-orange-500 text-white shadow-lg" : "text-slate-400 hover:bg-white/5 hover:text-white"}`}><Icon size={19} />{t(label)}<ChevronRight size={15} className="ml-auto opacity-40" /></button>)}</nav><div className="mt-6 rounded-2xl border border-white/10 bg-white/5 p-4"><p className="text-[10px] font-black uppercase tracking-[.16em] text-slate-500">{t("Invitation code")}</p><p className="mt-2 text-xl font-black text-white">{user?.invitationCode || "-"}</p><p className="mt-1 text-xs font-semibold text-slate-500">Bonus {money(user?.registrationBonus ?? 0)}</p></div></div><button aria-label="Close navigation overlay" className="flex-1 lg:hidden" onClick={() => setMenuOpen(false)} /></aside>
-      <main className="min-w-0 flex-1 p-4 sm:p-6 lg:p-8"><div className="mx-auto max-w-[1680px]"><div className="flex flex-wrap items-center justify-between gap-4"><div><p className="text-xs font-black uppercase tracking-[.18em] text-shopee-500">Admin command center</p><h1 className="mt-1 text-2xl font-black tracking-tight sm:text-3xl">{t(visibleTabs.find((item) => item.key === tab)?.label ?? "Overview")}</h1></div><div className="flex items-center gap-2">{tab === "overview" && <span className="hidden items-center gap-2 rounded-full border border-emerald-100 bg-emerald-50 px-3 py-2 text-[10px] font-black uppercase tracking-wide text-emerald-700 sm:inline-flex"><span className="h-2 w-2 animate-pulse rounded-full bg-emerald-500" /> Live data</span>}<Button variant="ghost" loading={refreshing} onClick={() => { void load("manual"); if (tab === "overview") void loadLiveOverview(); }}><RefreshCw size={17} /> {t("Refresh data")}</Button></div></div>{message && <div className="mt-5"><Notice message={message} tone={tone} onClose={() => setMessage("")} /></div>}
+      <main className="min-w-0 flex-1 p-4 sm:p-6 lg:p-8"><div className="mx-auto max-w-[1680px]"><div><p className="text-xs font-black uppercase tracking-[.18em] text-shopee-500">Admin command center</p><h1 className="mt-1 text-2xl font-black tracking-tight sm:text-3xl">{t(visibleTabs.find((item) => item.key === tab)?.label ?? "Overview")}</h1></div>
         {!["members", "tasks", "topups", "withdrawals"].includes(tab) && <div className="relative mt-5 md:hidden"><Search size={17} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" /><input value={query} onChange={(e) => setQuery(e.target.value)} className={`${inputClass} pl-10`} placeholder={t("Search data")} /></div>}
+        <div className="mt-4 flex items-center justify-end gap-2">{tab === "overview" && <span className="hidden items-center gap-2 rounded-full border border-emerald-100 bg-emerald-50 px-3 py-2 text-[10px] font-black uppercase tracking-wide text-emerald-700 sm:inline-flex"><span className="h-2 w-2 animate-pulse rounded-full bg-emerald-500" /> Live data</span>}<Button variant="ghost" loading={refreshing} onClick={() => { void refreshAdminData(); }}><RefreshCw size={17} /> {t("Refresh data")}</Button></div>{message && <div className="mt-5"><Notice message={message} tone={tone} onClose={() => setMessage("")} /></div>}
         {tab === "overview" ? (liveOverview || data ? <Overview members={liveOverview?.metrics.members ?? data?.members.length ?? 0} totalBalance={liveOverview?.metrics.totalBalance ?? totalBalance} pendingTopups={overviewPendingTopups} pendingWithdrawals={overviewPendingWithdrawals} pendingTasks={liveOverview?.metrics.tasksAwaitingAssignment ?? pendingTasks} transactions={liveOverview?.latestTransactions ?? data?.transactions ?? []} orders={liveOverview?.latestOrders ?? data?.orders ?? []} dailyAdminStats={selectedOverviewReport?.dailyAdminStats ?? []} dailyStatsDate={selectedOverviewReport?.statsRangeLabel ?? ""} administrators={liveOverview?.administrators ?? data?.staff ?? []} overviewPeriod={overviewPeriod} overviewAdminId={overviewAdminId} overviewLoading={overviewLoading || !selectedOverviewReport} overviewError={overviewError} onOverviewPeriodChange={(value) => { setLoadedOverviewKey(""); setOverviewLoading(true); setOverviewPeriod(value); }} onOverviewAdminChange={(value) => { setLoadedOverviewKey(""); setOverviewLoading(true); setOverviewAdminId(value); }} showAdminPerformance={user?.role === "SUPER_ADMIN"} /> : <AdminDataSkeleton />) : !data ? <AdminDataSkeleton /> : <>
           {tab === "members" && <Members members={filteredMembers} orders={data.orders} adminFilterId={selectedAdminId} scopePanel={adminScopePanel} canManage={user?.role === "SUPER_ADMIN"} canManageSecurity={user?.role === "SUPER_ADMIN" || user?.role === "ADMIN"} canManageWithdrawals={user?.role === "SUPER_ADMIN" || user?.role === "ADMIN"} perform={perform} />}
           {tab === "tasks" && <Tasks orders={filteredOrders} products={data.taskProducts} phoneQuery={phoneQuery} onPhoneQueryChange={setPhoneQuery} scopePanel={adminScopePanel} perform={perform} />}

@@ -76,6 +76,7 @@ const dictionary: Record<Language, Record<string, string>> = {
     "Settings": "Pengaturan",
     "Admin Team": "Tim Admin",
     "Refresh data": "Segarkan data",
+    "Admin data refreshed.": "Data admin berhasil disegarkan.",
     "Search members, orders, and transactions": "Cari anggota, pesanan, dan transaksi",
     "Search data": "Cari data",
     "Invitation code": "Kode undangan",
