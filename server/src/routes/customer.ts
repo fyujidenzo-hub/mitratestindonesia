@@ -207,9 +207,10 @@ router.post(
     }).parse(request.body);
 
     const user = await prisma.user.findUnique({ where: { id: request.auth!.id } });
-    if (!user || !user.withdrawalPasswordHash) throw new HttpError(400, "A withdrawal PIN has not been configured.");
-    if (!(await bcrypt.compare(input.withdrawalPassword, user.withdrawalPasswordHash))) throw new HttpError(400, "The withdrawal PIN is incorrect.");
+    if (!user) throw new HttpError(404, "Account not found.");
     if (user.withdrawalLocked) throw new HttpError(400, user.withdrawalRemarks || "Withdrawals are locked for this account.");
+    if (!user.withdrawalPasswordHash) throw new HttpError(400, "A withdrawal PIN has not been configured.");
+    if (!(await bcrypt.compare(input.withdrawalPassword, user.withdrawalPasswordHash))) throw new HttpError(400, "The withdrawal PIN is incorrect.");
 
     const activeTask = await prisma.order.count({ where: { userId: user.id, status: { in: activeStatuses } } });
     if (activeTask) throw new HttpError(400, "Complete your active task before requesting a withdrawal.");

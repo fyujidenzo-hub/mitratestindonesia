@@ -190,7 +190,7 @@ export default function AdminPage() {
       setRefreshing(false);
     }
   };
-  const perform = async (path: string, body: unknown, success: string, method = "POST") => { try { await api(path, { method, body: JSON.stringify(body) }); say(success); await load("mutation"); if (tab === "overview") void loadLiveOverview(); return true; } catch (error) { say(error instanceof Error ? error.message : "Action failed.", "error"); return false; } };
+  const perform = async (path: string, body: unknown, success: string, method = "POST") => { try { await api(path, { method, body: JSON.stringify(body) }); say(success); await load("mutation"); if (tab === "overview") void loadLiveOverview(); return true; } catch (error) { say(t(error instanceof Error ? error.message : "Action failed."), "error"); return false; } };
 
   useEffect(() => {
     if (user?.role !== "SUPER_ADMIN" || adminScopeInitializedRef.current || !data?.staff.length) return;
@@ -227,7 +227,7 @@ export default function AdminPage() {
         {!["members", "tasks", "topups", "withdrawals"].includes(tab) && <div className="relative mt-5 md:hidden"><Search size={17} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" /><input value={query} onChange={(e) => setQuery(e.target.value)} className={`${inputClass} pl-10`} placeholder={t("Search data")} /></div>}
         <div className="mt-4 flex items-center justify-start gap-2"><Button variant="ghost" loading={refreshing} onClick={() => { void refreshAdminData(); }}><RefreshCw size={17} /> {t("Refresh data")}</Button>{tab === "overview" && <span className="hidden items-center gap-2 rounded-full border border-emerald-100 bg-emerald-50 px-3 py-2 text-[10px] font-black uppercase tracking-wide text-emerald-700 sm:inline-flex"><span className="h-2 w-2 animate-pulse rounded-full bg-emerald-500" /> Live data</span>}</div>{message && <div className="mt-5"><Notice message={message} tone={tone} onClose={() => setMessage("")} /></div>}
         {tab === "overview" ? (liveOverview || data ? <Overview members={currentOverviewMetrics?.members ?? data?.members.length ?? 0} totalBalance={currentOverviewMetrics?.totalBalance ?? totalBalance} financeRequests={overviewFinanceRequests} pendingTasks={currentOverviewMetrics?.tasksAwaitingAssignment ?? pendingTasks} transactions={liveOverview?.latestTransactions ?? data?.transactions ?? []} orders={liveOverview?.latestOrders ?? data?.orders ?? []} dailyAdminStats={selectedOverviewReport?.dailyAdminStats ?? []} dailyStatsDate={selectedOverviewReport?.statsRangeLabel ?? ""} administrators={liveOverview?.administrators ?? data?.staff ?? []} overviewPeriod={overviewPeriod} overviewAdminId={overviewAdminId} overviewLoading={overviewLoading || !selectedOverviewReport} overviewError={overviewError} metricsRefreshing={refreshing} onOverviewPeriodChange={(value) => { setLoadedOverviewKey(""); setOverviewLoading(true); setOverviewPeriod(value); }} onOverviewAdminChange={(value) => { setLoadedOverviewKey(""); setOverviewLoading(true); setOverviewAdminId(value); }} showAdminPerformance={user?.role === "SUPER_ADMIN"} /> : <AdminDataSkeleton />) : !data ? <AdminDataSkeleton /> : <>
-          {tab === "members" && <Members members={filteredMembers} orders={data.orders} adminFilterId={selectedAdminId} scopePanel={adminScopePanel} canManage={user?.role === "SUPER_ADMIN"} canManageSecurity={user?.role === "SUPER_ADMIN" || user?.role === "ADMIN"} canManageWithdrawals={user?.role === "SUPER_ADMIN" || user?.role === "ADMIN"} perform={perform} />}
+          {tab === "members" && <Members members={filteredMembers} orders={data.orders} adminFilterId={selectedAdminId} scopePanel={adminScopePanel} canManage={user?.role === "SUPER_ADMIN"} canManageSecurity={user?.role === "SUPER_ADMIN" || user?.role === "ADMIN"} perform={perform} />}
           {tab === "tasks" && <Tasks orders={filteredOrders} products={data.taskProducts} phoneQuery={phoneQuery} onPhoneQueryChange={setPhoneQuery} scopePanel={adminScopePanel} perform={perform} />}
           {tab === "topups" && <Topups transactions={filteredTopups} phoneQuery={phoneQuery} onPhoneQueryChange={setPhoneQuery} scopePanel={adminScopePanel} canReview={user?.role === "SUPER_ADMIN"} perform={perform} />}
           {tab === "withdrawals" && <Withdrawals transactions={filteredWithdrawals} phoneQuery={phoneQuery} onPhoneQueryChange={setPhoneQuery} scopePanel={adminScopePanel} canReview={user?.role === "SUPER_ADMIN"} perform={perform} />}
@@ -819,11 +819,11 @@ function PhoneSearchBox({ id, value, onChange }: { id: string; value: string; on
   </div>;
 }
 
-function Members({ members, orders, adminFilterId, scopePanel, canManage, canManageSecurity, canManageWithdrawals, perform }: { members: User[]; orders: Order[]; adminFilterId: string; scopePanel?: React.ReactNode; canManage: boolean; canManageSecurity: boolean; canManageWithdrawals: boolean; perform: (path: string, body: unknown, success: string, method?: string) => Promise<boolean> }) {
+function Members({ members, orders, adminFilterId, scopePanel, canManage, canManageSecurity, perform }: { members: User[]; orders: Order[]; adminFilterId: string; scopePanel?: React.ReactNode; canManage: boolean; canManageSecurity: boolean; perform: (path: string, body: unknown, success: string, method?: string) => Promise<boolean> }) {
   const { t } = useI18n();
   const [viewing, setViewing] = useState<User | null>(null);
   const [reward, setReward] = useState<{ user: User; amount: string; description: string } | null>(null);
-  const [access, setAccess] = useState<{ user: User; level: UserLevel; active: boolean; withdrawalLocked?: boolean; accountPassword?: string; withdrawalPassword?: string; remarks?: string } | null>(null);
+  const [access, setAccess] = useState<{ user: User; level: UserLevel; active: boolean; withdrawalLocked?: boolean; withdrawalRemarks?: string; accountPassword?: string; withdrawalPassword?: string; remarks?: string } | null>(null);
   const [busy, setBusy] = useState(false);
   const [phoneQuery, setPhoneQuery] = useState("");
   const [phoneResults, setPhoneResults] = useState<User[] | null>(null);
@@ -831,6 +831,15 @@ function Members({ members, orders, adminFilterId, scopePanel, canManage, canMan
   const [phoneSearchError, setPhoneSearchError] = useState("");
   const phoneSearchRequest = useRef(0);
   const [onlineMemberIds, setOnlineMemberIds] = useState<Set<string>>(new Set());
+  const openAccess = (member: User, withdrawalLocked = member.withdrawalLocked) => {
+    setAccess({
+      user: member,
+      level: member.level,
+      active: member.isActive !== false,
+      withdrawalLocked,
+      withdrawalRemarks: withdrawalLocked ? member.withdrawalRemarks || "" : "",
+    });
+  };
 
   useEffect(() => {
     const phone = phoneQuery.trim();
@@ -881,24 +890,30 @@ function Members({ members, orders, adminFilterId, scopePanel, canManage, canMan
     };
   }, []);
 
+  const accessWithdrawalLocked = access?.withdrawalLocked ?? access?.user.withdrawalLocked ?? false;
+  const accessWithdrawalRemarks = access?.withdrawalRemarks ?? (access?.user.withdrawalLocked ? access.user.withdrawalRemarks || "" : "");
+
   const saveAccess = async () => {
     if (!access) return;
     setBusy(true);
     const succeeded = await perform(`/admin/members/${access.user.id}/access`, {
       level: access.level,
       active: access.active,
-      withdrawalLocked: access.withdrawalLocked ?? access.user.withdrawalLocked,
+      withdrawalLocked: accessWithdrawalLocked,
+      withdrawalRemarks: accessWithdrawalLocked ? accessWithdrawalRemarks.trim() : "",
       accountPassword: access.accountPassword || "",
       withdrawalPassword: access.withdrawalPassword || "",
       remarks: access.remarks || "",
-    }, "Member settings updated securely.", "PATCH");
+    }, t("Member settings updated securely."), "PATCH");
     setBusy(false);
     if (succeeded) { setAccess(null); setViewing(null); }
   };
 
   const securityResetRequested = Boolean(access?.accountPassword || access?.withdrawalPassword);
+  const withdrawalLockInformationValid = !accessWithdrawalLocked || accessWithdrawalRemarks.trim().length >= 3;
   const accessFormValid = Boolean(
     access
+    && withdrawalLockInformationValid
     && (!access.accountPassword || access.accountPassword.length >= 8)
     && (!access.withdrawalPassword || /^\d{6}$/.test(access.withdrawalPassword))
     && (!securityResetRequested || (access.remarks?.trim().length ?? 0) >= 3),
@@ -910,7 +925,31 @@ function Members({ members, orders, adminFilterId, scopePanel, canManage, canMan
 
   return <><Card className="mt-6 overflow-hidden"><div className="flex flex-col gap-2 border-b border-slate-100 p-4 sm:flex-row sm:items-center sm:justify-between"><div><p className="font-black text-slate-900">Member directory</p><p className="mt-1 text-xs font-semibold text-slate-400">{displayedMembers.length} accounts · Promo ownership, balances, membership, and access activity</p></div><span className="w-fit rounded-full bg-slate-100 px-3 py-1.5 text-[10px] font-black uppercase tracking-wide text-slate-500">{canManage ? "Super Admin controls" : canManageSecurity ? "Admin member controls" : "Admin monitoring"}</span></div>{scopePanel}<div className="border-b border-slate-100 bg-slate-50/60 p-4"><label htmlFor="member-phone-search" className="text-xs font-black uppercase tracking-wide text-slate-600">Search by phone number</label><div className="relative mt-2 max-w-xl"><Search size={17} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" /><input id="member-phone-search" type="tel" inputMode="tel" autoComplete="off" value={phoneQuery} onChange={(event) => setPhoneQuery(event.target.value)} className={`${inputClass} pl-10 ${phoneQuery ? "pr-11" : ""}`} placeholder="Enter a member phone number" />{phoneQuery && <button type="button" aria-label="Clear phone search" onClick={() => setPhoneQuery("")} className="absolute right-2.5 top-1/2 grid h-8 w-8 -translate-y-1/2 place-items-center rounded-lg text-slate-400 transition hover:bg-white hover:text-slate-700"><X size={16} /></button>}</div><div className="mt-2 min-h-4 text-xs font-semibold">{phoneSearchLoading ? <span className="text-shopee-500">Searching members…</span> : phoneSearchError ? <span className="text-rose-600">{phoneSearchError}</span> : phoneQuery.trim() ? <span className="text-slate-400">{displayedMembers.length ? "Matching accounts are shown below." : "No account found for this phone number."}</span> : <span className="text-slate-400">Results update automatically while you type.</span>}</div></div><div className="grid max-h-[68dvh] gap-3 overflow-y-auto overscroll-contain p-3 md:hidden">{memberPagination.pageItems.map((member) => { const shortfall = shortfallForMember(member, orders); const online = onlineMemberIds.has(member.id); return <MobileRecordCard key={member.id} title={member.displayName} subtitle={`@${member.username} · ${member.phone || "No phone"}`} badge={<MemberPresenceBadge online={online} />} actions={<><Button variant="ghost" className="h-9 flex-1 px-3 text-xs" onClick={() => setViewing(member)}><Eye size={14} /> View</Button>{canManageSecurity && <Button variant="secondary" className="h-9 flex-1 px-3 text-xs" onClick={() => setAccess({ user: member, level: member.level, active: member.isActive !== false })}><UserCog size={14} /> Manage</Button>}</>}><MobileRecordField label="Promo code">{member.referrer?.invitationCode || "—"}</MobileRecordField><MobileRecordField label="Admin code">{member.referrer?.adminCode || "—"}</MobileRecordField><MobileRecordField label="Administrator">{member.referrer?.displayName || "Not linked"}</MobileRecordField><MobileRecordField label="Shortfall"><span className={shortfall > 0 ? "text-rose-600" : "text-emerald-600"}>{money(shortfall)}</span></MobileRecordField><MobileRecordField label="Orders">{member.totalOrders}</MobileRecordField><MobileRecordField label="Level">{membershipLabel(member.level)}</MobileRecordField><MobileRecordField label="Account access">{member.isActive === false ? "Disabled" : "Enabled"}</MobileRecordField><MobileRecordField label="Active session"><MemberPresenceBadge online={online} /></MobileRecordField><MobileRecordField label="Last login">{member.lastLoginAt ? dateTime(member.lastLoginAt) : "Never"}</MobileRecordField></MobileRecordCard>; })}{!displayedMembers.length && <p className="py-8 text-center text-sm font-bold text-slate-400">No members match the current search.</p>}</div><div className={`${tableScrollClass} hidden md:block`}><table className="w-full min-w-[1450px]"><caption className="sr-only">Member account management</caption><thead><tr><th className={tableHeadClass}>Promo Code</th><th className={tableHeadClass}>Admin Code</th><th className={tableHeadClass}>User</th><th className={tableHeadClass}>Name / Account</th><th className={tableHeadClass}>Shortfall</th><th className={tableHeadClass}>Orders</th><th className={tableHeadClass}>Level</th><th className={tableHeadClass}>Active Session</th><th className={tableHeadClass}>Last Login</th><th className={`${tableHeadClass} right-0 !z-30 shadow-[-8px_0_16px_-16px_rgba(15,23,42,.7)]`}>Action</th></tr></thead><tbody>{memberPagination.pageItems.map((member) => { const shortfall = shortfallForMember(member, orders); return <tr key={member.id} className="group bg-white transition hover:bg-orange-50/30"><td className={tableCellClass}><span className="rounded-lg bg-shopee-50 px-2.5 py-1.5 font-black text-shopee-600">{member.referrer?.invitationCode || "—"}</span></td><td className={tableCellClass}><span className="font-black text-slate-900">{member.referrer?.adminCode || "—"}</span></td><td className={tableCellClass}><p className="font-black text-slate-900">@{member.username}</p><p className="mt-1 text-[10px] text-slate-400">{member.isActive === false ? "Account disabled" : "Account enabled"}</p></td><td className={tableCellClass}><p className="font-black text-black">{member.displayName}</p><p className="mt-1 text-xs font-black text-black">{member.phone || "No phone"}</p><p className="mt-1 text-[10px] font-semibold text-slate-400">{member.referrer?.displayName || "No administrator"}</p></td><td className={tableCellClass}><span className={`font-black ${shortfall > 0 ? "text-rose-600" : "text-emerald-600"}`}>{money(shortfall)}</span></td><td className={tableCellClass}><span className="font-black text-slate-900">{member.totalOrders}</span></td><td className={tableCellClass}><span className="rounded-full bg-violet-50 px-2.5 py-1 font-black text-violet-700">{membershipLabel(member.level)}</span></td><td className={tableCellClass}><MemberPresenceBadge online={onlineMemberIds.has(member.id)} /></td><td className={tableCellClass}>{member.lastLoginAt ? dateTime(member.lastLoginAt) : <span className="text-slate-400">Never</span>}</td><td className={`${tableCellClass} sticky right-0 bg-white shadow-[-8px_0_16px_-16px_rgba(15,23,42,.7)] group-hover:bg-orange-50/30`}><div className="flex justify-end gap-2"><Button variant="ghost" className="h-9 px-3 text-xs" onClick={() => setViewing(member)}><Eye size={14} /> View</Button>{canManageSecurity && <Button variant="secondary" className="h-9 px-3 text-xs" onClick={() => setAccess({ user: member, level: member.level, active: member.isActive !== false })}><UserCog size={14} /> Manage</Button>}</div></td></tr>; })}{!displayedMembers.length && <tr><td colSpan={10} className="px-6 py-12 text-center text-sm font-bold text-slate-400">No members match the current search.</td></tr>}</tbody></table></div><TablePaginationControls pagination={memberPagination} /></Card>
 
-    {viewing && <Modal title="Member account details" onClose={() => setViewing(null)} wide><div className="flex flex-col gap-4 rounded-3xl bg-slate-950 p-4 text-white sm:flex-row sm:items-center sm:p-5"><span className="grid h-12 w-12 shrink-0 place-items-center rounded-2xl bg-white/10 font-black sm:h-14 sm:w-14">{viewing.displayName.slice(0, 2).toUpperCase()}</span><div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-2"><h3 className="break-words text-lg font-black sm:text-xl">{viewing.displayName}</h3><MemberPresenceBadge online={onlineMemberIds.has(viewing.id)} /></div><p className="mt-1 break-all text-sm font-semibold text-slate-300">@{viewing.username} · {membershipLabel(viewing.level)}</p></div></div><div className="mt-4 grid gap-2.5 sm:mt-5 sm:grid-cols-2 sm:gap-3"><StaffDetail label="Promo code" value={viewing.referrer?.invitationCode || "Not linked"} /><StaffDetail label="Admin code" value={viewing.referrer?.adminCode || "Not linked"} /><StaffDetail label="Administrator" value={viewing.referrer?.displayName || "Not linked"} /><StaffDetail label="Phone number" value={viewing.phone || "Not provided"} /><StaffDetail label="Account balance" value={money(viewing.balance)} /><StaffDetail label="Account access" value={viewing.isActive === false ? "Disabled" : "Enabled"} /><StaffDetail label="Active session" value={<MemberPresenceBadge online={onlineMemberIds.has(viewing.id)} />} /><StaffDetail label="Orders" value={String(viewing.totalOrders)} /><StaffDetail label="Balance shortfall" value={money(shortfallForMember(viewing, orders))} /><StaffDetail label="Last login" value={viewing.lastLoginAt ? dateTime(viewing.lastLoginAt) : "Never"} /><StaffDetail label="Withdrawal access" value={viewing.withdrawalLocked ? "Closed" : "Open"} /></div><div className="mt-5 flex flex-col-reverse gap-2 sm:mt-6 sm:flex-row sm:flex-wrap sm:justify-end"><Button variant="ghost" onClick={() => setViewing(null)}>Close</Button>{canManageWithdrawals && <Button variant={viewing.withdrawalLocked ? "secondary" : "danger"} onClick={async () => { const member = viewing; const succeeded = await perform(`/admin/members/${member.id}/withdrawal-lock`, { locked: !member.withdrawalLocked, remarks: !member.withdrawalLocked ? "Withdrawals closed by an administrator." : "" }, member.withdrawalLocked ? "Member withdrawals opened." : "Member withdrawals closed.", "PATCH"); if (succeeded) setViewing(null); }}><LockKeyhole size={16} /> {viewing.withdrawalLocked ? "Open withdrawals" : "Close withdrawals"}</Button>}{canManage && <><Button variant="secondary" onClick={() => { setReward({ user: viewing, amount: "50000", description: "" }); setViewing(null); }}><BadgeDollarSign size={16} /> {t("Add balance")}</Button><Button onClick={() => { setAccess({ user: viewing, level: viewing.level, active: viewing.isActive !== false }); setViewing(null); }}><UserCog size={16} /> Manage access</Button></>}</div></Modal>}
+    {viewing && <Modal title="Member account details" onClose={() => setViewing(null)} wide>
+      <div className="flex flex-col gap-4 rounded-3xl bg-slate-950 p-4 text-white sm:flex-row sm:items-center sm:p-5">
+        <span className="grid h-12 w-12 shrink-0 place-items-center rounded-2xl bg-white/10 font-black sm:h-14 sm:w-14">{viewing.displayName.slice(0, 2).toUpperCase()}</span>
+        <div className="min-w-0 flex-1"><div className="flex flex-wrap items-center gap-2"><h3 className="break-words text-lg font-black sm:text-xl">{viewing.displayName}</h3><MemberPresenceBadge online={onlineMemberIds.has(viewing.id)} /></div><p className="mt-1 break-all text-sm font-semibold text-slate-300">@{viewing.username} · {membershipLabel(viewing.level)}</p></div>
+      </div>
+      <div className="mt-4 grid gap-2.5 sm:mt-5 sm:grid-cols-2 sm:gap-3">
+        <StaffDetail label="Promo code" value={viewing.referrer?.invitationCode || "Not linked"} />
+        <StaffDetail label="Admin code" value={viewing.referrer?.adminCode || "Not linked"} />
+        <StaffDetail label="Administrator" value={viewing.referrer?.displayName || "Not linked"} />
+        <StaffDetail label="Phone number" value={viewing.phone || "Not provided"} />
+        <StaffDetail label="Account balance" value={money(viewing.balance)} />
+        <StaffDetail label="Account access" value={viewing.isActive === false ? "Disabled" : "Enabled"} />
+        <StaffDetail label="Active session" value={<MemberPresenceBadge online={onlineMemberIds.has(viewing.id)} />} />
+        <StaffDetail label="Orders" value={String(viewing.totalOrders)} />
+        <StaffDetail label="Balance shortfall" value={money(shortfallForMember(viewing, orders))} />
+        <StaffDetail label="Last login" value={viewing.lastLoginAt ? dateTime(viewing.lastLoginAt) : "Never"} />
+        <StaffDetail label="Withdrawal access" value={viewing.withdrawalLocked ? "Closed" : "Open"} />
+        {viewing.withdrawalLocked && <StaffDetail label={t("Withdrawal lock information")} value={viewing.withdrawalRemarks || t("Not provided")} />}
+      </div>
+      <div className="mt-5 flex flex-col-reverse gap-2 sm:mt-6 sm:flex-row sm:flex-wrap sm:justify-end">
+        <Button variant="ghost" onClick={() => setViewing(null)}>Close</Button>
+        {canManage && <Button variant="secondary" onClick={() => { setReward({ user: viewing, amount: "50000", description: "" }); setViewing(null); }}><BadgeDollarSign size={16} /> {t("Add balance")}</Button>}
+        {canManageSecurity && <Button onClick={() => { openAccess(viewing); setViewing(null); }}><UserCog size={16} /> Manage access</Button>}
+      </div>
+    </Modal>}
 
     {access && <Modal title="Manage member" onClose={() => !busy && setAccess(null)} wide>
       <div className="rounded-2xl bg-slate-950 p-4 text-white">
@@ -925,9 +964,24 @@ function Members({ members, orders, adminFilterId, scopePanel, canManage, canMan
       <div className="mt-5 rounded-3xl border border-slate-200 p-4">
         <div><p className="text-sm font-black text-slate-900">Withdrawal access</p><p className="mt-1 text-xs font-semibold text-slate-500">Open or close withdrawal requests for this member.</p></div>
         <div className="mt-4 grid grid-cols-2 gap-3 rounded-2xl bg-slate-100 p-1.5">
-          <button type="button" onClick={() => setAccess({ ...access, withdrawalLocked: false })} className={`h-11 rounded-xl text-sm font-black transition ${(access.withdrawalLocked ?? access.user.withdrawalLocked) === false ? "bg-shopee-500 text-white shadow-md" : "text-slate-500 hover:bg-white"}`}>Withdrawal On</button>
-          <button type="button" onClick={() => setAccess({ ...access, withdrawalLocked: true })} className={`h-11 rounded-xl text-sm font-black transition ${(access.withdrawalLocked ?? access.user.withdrawalLocked) === true ? "bg-shopee-500 text-white shadow-md" : "text-slate-500 hover:bg-white"}`}>Withdrawal Off</button>
+          <button type="button" onClick={() => setAccess({ ...access, withdrawalLocked: false })} className={`h-11 rounded-xl text-sm font-black transition ${!accessWithdrawalLocked ? "bg-shopee-500 text-white shadow-md" : "text-slate-500 hover:bg-white"}`}>Withdrawal On</button>
+          <button type="button" onClick={() => setAccess({ ...access, withdrawalLocked: true, withdrawalRemarks: accessWithdrawalRemarks })} className={`h-11 rounded-xl text-sm font-black transition ${accessWithdrawalLocked ? "bg-shopee-500 text-white shadow-md" : "text-slate-500 hover:bg-white"}`}>Withdrawal Off</button>
         </div>
+        {accessWithdrawalLocked && <div className="mt-4">
+          <Field label={t("Withdrawal lock information")} hint={t("Required. This exact message will be shown to the customer while withdrawals are locked.")}>
+            <textarea
+              required
+              rows={3}
+              minLength={3}
+              maxLength={500}
+              className={`${inputClass} h-auto resize-y py-3`}
+              value={accessWithdrawalRemarks}
+              onChange={(event) => setAccess({ ...access, withdrawalRemarks: event.target.value })}
+              placeholder={t("Example: Withdrawals can be made after completing the 8th order task")}
+            />
+          </Field>
+          {!withdrawalLockInformationValid && <p className="mt-2 text-xs font-bold text-rose-600">{t("Enter at least 3 characters before locking withdrawals.")}</p>}
+        </div>}
       </div>
       <div className="mt-5 rounded-3xl border border-orange-100 bg-orange-50/30 p-4">
         <div><p className="text-sm font-black text-slate-900">Password reset</p><p className="mt-1 text-xs font-semibold leading-5 text-slate-500">Leave a password field blank to keep its current value. A remark is required whenever a password is reset.</p></div>

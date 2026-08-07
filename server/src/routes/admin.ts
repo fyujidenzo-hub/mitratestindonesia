@@ -1179,6 +1179,7 @@ router.patch(
       level: z.enum(UserLevel),
       active: z.boolean(),
       withdrawalLocked: z.boolean().optional(),
+      withdrawalRemarks: z.string().trim().max(500).optional(),
       accountPassword: z.union([z.string().min(8).max(100), z.literal("")]).optional().default(""),
       withdrawalPassword: z.union([z.string().regex(/^\d{6}$/, "Use a 6 digit withdrawal PIN."), z.literal("")]).optional().default(""),
       remarks: z.string().trim().max(500).optional().default(""),
@@ -1194,7 +1195,7 @@ router.patch(
         role: UserRole.CUSTOMER,
         ...(request.auth!.role === UserRole.SUPER_ADMIN ? {} : { referrerId: request.auth!.id }),
       },
-      select: { id: true, username: true, level: true, isActive: true, withdrawalLocked: true },
+      select: { id: true, username: true, level: true, isActive: true, withdrawalLocked: true, withdrawalRemarks: true },
     });
     if (!existing) throw new HttpError(404, "Member account not found.");
     if (request.auth!.role !== UserRole.SUPER_ADMIN && (storedLevel !== existing.level || input.active !== existing.isActive)) {
@@ -1203,6 +1204,11 @@ router.patch(
 
     const accountPasswordHash = input.accountPassword ? await bcrypt.hash(input.accountPassword, 12) : undefined;
     const withdrawalPasswordHash = input.withdrawalPassword ? await bcrypt.hash(input.withdrawalPassword, 12) : undefined;
+    const withdrawalLocked = input.withdrawalLocked ?? existing.withdrawalLocked;
+    const withdrawalRemarks = input.withdrawalRemarks ?? existing.withdrawalRemarks ?? "";
+    if (withdrawalLocked && withdrawalRemarks.trim().length < 3) {
+      throw new HttpError(400, "Add withdrawal lock information before locking withdrawals.");
+    }
 
     const member = await prisma.$transaction(async (database) => {
       const updated = await database.user.update({
@@ -1210,7 +1216,8 @@ router.patch(
         data: {
           level: storedLevel,
           isActive: input.active,
-          withdrawalLocked: input.withdrawalLocked ?? existing.withdrawalLocked,
+          withdrawalLocked,
+          withdrawalRemarks: withdrawalLocked ? withdrawalRemarks.trim() : null,
           ...(accountPasswordHash ? { passwordHash: accountPasswordHash } : {}),
           ...(withdrawalPasswordHash ? { withdrawalPasswordHash } : {}),
         },
@@ -1228,7 +1235,9 @@ router.patch(
             previousActive: existing.isActive,
             active: input.active,
             previousWithdrawalLocked: existing.withdrawalLocked,
-            withdrawalLocked: input.withdrawalLocked ?? existing.withdrawalLocked,
+            withdrawalLocked,
+            previousWithdrawalRemarks: existing.withdrawalRemarks,
+            withdrawalRemarks: withdrawalLocked ? withdrawalRemarks.trim() : null,
             accountPasswordReset: Boolean(accountPasswordHash),
             withdrawalPasswordReset: Boolean(withdrawalPasswordHash),
             remarks: input.remarks || null,
@@ -1245,7 +1254,13 @@ router.patch(
   "/members/:id/withdrawal-lock",
   requireRole(UserRole.SUPER_ADMIN, UserRole.ADMIN),
   asyncHandler(async (request: AuthRequest, response) => {
-    const input = z.object({ locked: z.boolean(), remarks: z.string().trim().max(500).optional() }).parse(request.body);
+    const input = z.object({
+      locked: z.boolean(),
+      remarks: z.string().trim().max(500).optional().default(""),
+    }).refine(
+      (value) => !value.locked || value.remarks.length >= 3,
+      { message: "Add withdrawal lock information before locking withdrawals.", path: ["remarks"] },
+    ).parse(request.body);
     const memberId = String(request.params.id);
     const existing = await prisma.user.findFirst({
       where: {
@@ -1258,7 +1273,7 @@ router.patch(
     if (!existing) throw new HttpError(404, "Member account not found.");
 
     const user = await prisma.$transaction(async (database) => {
-      const updated = await database.user.update({ where: { id: memberId }, data: { withdrawalLocked: input.locked, withdrawalRemarks: input.remarks || null } });
+      const updated = await database.user.update({ where: { id: memberId }, data: { withdrawalLocked: input.locked, withdrawalRemarks: input.locked ? input.remarks : null } });
       await database.auditLog.create({
         data: {
           actorId: request.auth!.id,
