@@ -1,4 +1,4 @@
-import { Bell, Check, CheckCheck, ExternalLink, RefreshCw, Smartphone, Trash2, X } from "lucide-react";
+import { Bell, Check, CheckCheck, ChevronLeft, ExternalLink, Home, RefreshCw, Share2, Smartphone, Trash2, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 import { api, dateTime } from "../lib/api";
@@ -36,7 +36,10 @@ export function NotificationBell() {
   const [pushBusy, setPushBusy] = useState(false);
   const [pushMessage, setPushMessage] = useState("");
   const [pushEnabled, setPushEnabled] = useState(() => pushSupported() && Notification.permission === "granted");
+  const [showIosGuide, setShowIosGuide] = useState(false);
   const containerRef = useRef<HTMLDivElement>(null);
+  const iosNeedsInstall = isIosWithoutHomeScreenInstall();
+  const browserSupportsPush = pushSupported();
 
   const load = useCallback(async (showSpinner = false) => {
     if (!user) return;
@@ -173,11 +176,23 @@ export function NotificationBell() {
       </div>
 
       {!pushEnabled && <div className="border-b border-slate-100 bg-sky-50/70 p-3">
-        <button type="button" disabled={pushBusy || !pushSupported()} onClick={() => void enablePhonePush()} className="flex w-full items-center gap-3 rounded-2xl bg-white p-3 text-left shadow-sm ring-1 ring-sky-100 disabled:opacity-60">
+        {showIosGuide && iosNeedsInstall ? <div className="rounded-2xl bg-white p-4 shadow-sm ring-1 ring-sky-100">
+          <button type="button" onClick={() => setShowIosGuide(false)} className="flex items-center gap-1 text-[10px] font-black uppercase tracking-wide text-sky-700"><ChevronLeft size={14} /> Back</button>
+          <div className="mt-3 flex items-center gap-3">
+            <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-sky-100 text-sky-700"><Smartphone size={19} /></span>
+            <div><p className="text-sm font-black text-slate-900">Install on iPhone first</p><p className="mt-0.5 text-[10px] font-semibold leading-4 text-slate-500">Apple enables Web Push only for Home Screen web apps on iOS 16.4 or later.</p></div>
+          </div>
+          <ol className="mt-4 space-y-3 text-xs font-bold leading-5 text-slate-700">
+            <li className="flex gap-3"><span className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-sky-100 text-[10px] text-sky-700">1</span><span>Open <strong>mitratestindonesia.com</strong> in Safari.</span></li>
+            <li className="flex gap-3"><span className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-sky-100 text-[10px] text-sky-700">2</span><span>Tap Safari’s <Share2 size={14} className="mx-1 inline" /> <strong>Share</strong> button, then choose <strong>Add to Home Screen</strong>.</span></li>
+            <li className="flex gap-3"><span className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-sky-100 text-[10px] text-sky-700">3</span><span>Tap <strong>Add</strong>, then close this browser tab.</span></li>
+            <li className="flex gap-3"><span className="grid h-6 w-6 shrink-0 place-items-center rounded-full bg-sky-100 text-[10px] text-sky-700">4</span><span>Open the <Home size={14} className="mx-1 inline" /> Home Screen app, sign in, open this bell, and tap <strong>Enable phone notifications</strong>.</span></li>
+          </ol>
+        </div> : <button type="button" disabled={pushBusy || (!iosNeedsInstall && !browserSupportsPush)} onClick={() => { if (iosNeedsInstall) setShowIosGuide(true); else void enablePhonePush(); }} className="flex w-full items-center gap-3 rounded-2xl bg-white p-3 text-left shadow-sm ring-1 ring-sky-100 disabled:opacity-60">
           <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-sky-100 text-sky-700"><Smartphone size={19} /></span>
-          <span className="min-w-0 flex-1"><span className="block text-xs font-black text-slate-900">{pushBusy ? "Enabling…" : "Enable phone notifications"}</span><span className="mt-0.5 block text-[10px] font-semibold leading-4 text-slate-500">{isIosWithoutHomeScreenInstall() ? "Add to Home Screen first on iPhone." : "Receive alerts even when this page is closed."}</span></span>
+          <span className="min-w-0 flex-1"><span className="block text-xs font-black text-slate-900">{pushBusy ? "Enabling…" : iosNeedsInstall ? "Set up notifications on iPhone" : "Enable phone notifications"}</span><span className="mt-0.5 block text-[10px] font-semibold leading-4 text-slate-500">{iosNeedsInstall ? "Tap for the Safari and Home Screen steps." : browserSupportsPush ? "Receive alerts even when this page is closed." : "This browser does not support Web Push notifications."}</span></span>
           <ExternalLink size={15} className="text-slate-400" />
-        </button>
+        </button>}
         {pushMessage && <p className="mt-2 px-1 text-[10px] font-bold leading-4 text-sky-800">{pushMessage}</p>}
       </div>}
       {pushEnabled && <div className="flex items-center gap-2 border-b border-emerald-100 bg-emerald-50 px-4 py-2.5 text-[10px] font-black text-emerald-700"><Check size={14} /> Phone alerts enabled on this device</div>}

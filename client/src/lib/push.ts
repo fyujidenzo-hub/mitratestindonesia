@@ -15,11 +15,18 @@ export function pushSupported() {
   return "serviceWorker" in navigator && "PushManager" in window && "Notification" in window;
 }
 
-export function isIosWithoutHomeScreenInstall() {
-  const ios = /iphone|ipad|ipod/i.test(navigator.userAgent);
-  const standalone = window.matchMedia("(display-mode: standalone)").matches
+export function isIosDevice() {
+  return /iphone|ipad|ipod/i.test(navigator.userAgent)
+    || (/macintosh/i.test(navigator.userAgent) && navigator.maxTouchPoints > 1);
+}
+
+export function isStandaloneApp() {
+  return window.matchMedia("(display-mode: standalone)").matches
     || ("standalone" in navigator && Boolean((navigator as Navigator & { standalone?: boolean }).standalone));
-  return ios && !standalone;
+}
+
+export function isIosWithoutHomeScreenInstall() {
+  return isIosDevice() && !isStandaloneApp();
 }
 
 export async function registerAppServiceWorker() {
