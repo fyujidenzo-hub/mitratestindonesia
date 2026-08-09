@@ -13,6 +13,11 @@ import {
   rewardSettingKeys,
   rewardSettingsFromValues,
 } from "../lib/reward-settings.js";
+import {
+  createNotifications,
+  dispatchNotificationIds,
+  staffRecipientsForCustomer,
+} from "../lib/notifications.js";
 
 const router = Router();
 const activeStatuses = [OrderStatus.WAITING_ASSIGNMENT, OrderStatus.PRODUCT_ASSIGNED, OrderStatus.WAITING_SHIPMENT, OrderStatus.PENDING_DELIVERY];
@@ -174,24 +179,38 @@ router.post(
     }
 
     const proofData = Uint8Array.from(request.file.buffer);
-    const transaction = await prisma.transaction.create({
-      data: {
-        requestNumber: requestNumber("TU"),
-        userId: request.auth!.id,
-        type: TransactionType.TOPUP,
-        amount,
-        senderName: input.senderName,
-        proofPath: paymentProofStorageName(request.file.mimetype),
-        proofOriginalName: request.file.originalname,
-        proofFile: {
-          create: {
-            mimeType: request.file.mimetype,
-            data: proofData,
+    const result = await prisma.$transaction(async (database) => {
+      const transaction = await database.transaction.create({
+        data: {
+          requestNumber: requestNumber("TU"),
+          userId: request.auth!.id,
+          type: TransactionType.TOPUP,
+          amount,
+          senderName: input.senderName,
+          proofPath: paymentProofStorageName(request.file!.mimetype),
+          proofOriginalName: request.file!.originalname,
+          proofFile: {
+            create: {
+              mimeType: request.file!.mimetype,
+              data: proofData,
+            },
           },
         },
-      },
+      });
+      const staff = await staffRecipientsForCustomer(database, request.auth!.id);
+      const notificationIds = await createNotifications(database, staff.recipientIds, {
+        type: "TOPUP_SUBMITTED",
+        title: "New top-up request",
+        body: `${staff.customerName} submitted ${transaction.requestNumber} for review.`,
+        path: "/admin?tab=topups",
+        entityType: "Transaction",
+        entityId: transaction.id,
+        dedupeKey: `transaction:${transaction.id}:submitted`,
+      });
+      return { transaction, notificationIds };
     });
-    response.status(201).json(jsonSafe({ transaction }));
+    await dispatchNotificationIds(result.notificationIds);
+    response.status(201).json(jsonSafe({ transaction: result.transaction }));
   }),
 );
 
@@ -215,13 +234,13 @@ router.post(
     const activeTask = await prisma.order.count({ where: { userId: user.id, status: { in: activeStatuses } } });
     if (activeTask) throw new HttpError(400, "Complete your active task before requesting a withdrawal.");
 
-    const transaction = await prisma.$transaction(async (database) => {
+    const result = await prisma.$transaction(async (database) => {
       const debit = await database.user.updateMany({
         where: { id: user.id, balance: { gte: BigInt(input.amount) }, withdrawalLocked: false },
         data: { balance: { decrement: BigInt(input.amount) } },
       });
       if (debit.count !== 1) throw new HttpError(400, "Insufficient balance.");
-      return database.transaction.create({
+      const transaction = await database.transaction.create({
         data: {
           requestNumber: requestNumber("WD"),
           userId: user.id,
@@ -234,8 +253,20 @@ router.post(
           balanceDeductedAt: new Date(),
         },
       });
+      const staff = await staffRecipientsForCustomer(database, user.id);
+      const notificationIds = await createNotifications(database, staff.recipientIds, {
+        type: "WITHDRAWAL_SUBMITTED",
+        title: "New withdrawal request",
+        body: `${staff.customerName} submitted ${transaction.requestNumber} for review.`,
+        path: "/admin?tab=withdrawals",
+        entityType: "Transaction",
+        entityId: transaction.id,
+        dedupeKey: `transaction:${transaction.id}:submitted`,
+      });
+      return { transaction, notificationIds };
     });
-    response.status(201).json(jsonSafe({ transaction }));
+    await dispatchNotificationIds(result.notificationIds);
+    response.status(201).json(jsonSafe({ transaction: result.transaction }));
   }),
 );
 
@@ -246,19 +277,33 @@ router.post(
     const activeOrder = await prisma.order.findFirst({ where: { userId: request.auth!.id, status: { in: activeStatuses } } });
     if (activeOrder) throw new HttpError(409, "You still have an active task.");
 
-    const order = await prisma.order.create({
-      data: {
-        referenceNumber: requestNumber("PSN"),
-        userId: request.auth!.id,
-        status: OrderStatus.WAITING_ASSIGNMENT,
-        totalValue: 0n,
-        commission: 0n,
-        requiredBalance: 0n,
-        events: { create: [{ actorId: request.auth!.id, toStatus: OrderStatus.WAITING_ASSIGNMENT, note: "Task accepted by the customer." }] },
-      },
-      include: { items: true, events: true },
+    const result = await prisma.$transaction(async (database) => {
+      const order = await database.order.create({
+        data: {
+          referenceNumber: requestNumber("PSN"),
+          userId: request.auth!.id,
+          status: OrderStatus.WAITING_ASSIGNMENT,
+          totalValue: 0n,
+          commission: 0n,
+          requiredBalance: 0n,
+          events: { create: [{ actorId: request.auth!.id, toStatus: OrderStatus.WAITING_ASSIGNMENT, note: "Task accepted by the customer." }] },
+        },
+        include: { items: true, events: true },
+      });
+      const staff = await staffRecipientsForCustomer(database, request.auth!.id);
+      const notificationIds = await createNotifications(database, staff.recipientIds, {
+        type: "TASK_ACCEPTED",
+        title: "New task awaiting assignment",
+        body: `${staff.customerName} accepted task ${order.referenceNumber}.`,
+        path: "/admin?tab=tasks",
+        entityType: "Order",
+        entityId: order.id,
+        dedupeKey: `order:${order.id}:accepted`,
+      });
+      return { order, notificationIds };
     });
-    response.status(201).json(jsonSafe({ order }));
+    await dispatchNotificationIds(result.notificationIds);
+    response.status(201).json(jsonSafe({ order: result.order }));
   }),
 );
 
@@ -301,6 +346,7 @@ router.post(
       const configuredMilestone = parseRewardMilestones(rewardMilestoneSetting?.value)
         .find((milestone) => milestone.task === completedUser.totalOrders);
       const rewardAmount = BigInt(configuredMilestone?.amount ?? 0);
+      const notificationIds: string[] = [];
       if (rewardAmount > 0n) {
         const rewardDescription = `Bonus Reward for Completing the ${ordinal(completedUser.totalOrders)} Task`;
         await database.user.update({ where: { id: request.auth!.id }, data: { balance: { increment: rewardAmount } } });
@@ -319,14 +365,50 @@ router.post(
         });
       }
       await database.orderEvent.create({ data: { orderId: order.id, actorId: request.auth!.id, fromStatus: order.status, toStatus: OrderStatus.DELIVERED, note: "Product accepted; task completed and commission credited." } });
+      notificationIds.push(...await createNotifications(database, [request.auth!.id], {
+        type: "TASK_COMPLETED",
+        title: "Task completed",
+        body: `${order.referenceNumber} was completed and your commission was credited.`,
+        path: "/orders",
+        entityType: "Order",
+        entityId: order.id,
+        dedupeKey: `order:${order.id}:completed`,
+      }));
+      if (rewardAmount > 0n) {
+        notificationIds.push(...await createNotifications(database, [request.auth!.id], {
+          type: "REWARD_CREDITED",
+          title: "Milestone reward credited",
+          body: `Your reward for completing task ${completedUser.totalOrders} was added to your balance.`,
+          path: "/history",
+          entityType: "Order",
+          entityId: order.id,
+          dedupeKey: `order:${order.id}:milestone-reward`,
+        }));
+      }
+      const staff = await staffRecipientsForCustomer(database, request.auth!.id);
+      notificationIds.push(...await createNotifications(database, staff.recipientIds, {
+        type: "TASK_COMPLETED_BY_CUSTOMER",
+        title: "Customer completed a task",
+        body: `${staff.customerName} completed ${order.referenceNumber}.`,
+        path: "/admin?tab=tasks",
+        entityType: "Order",
+        entityId: order.id,
+        dedupeKey: `order:${order.id}:customer-completed`,
+      }));
       const completedOrder = await database.order.findUnique({ where: { id: order.id }, include: { items: true, events: true } });
       return {
         order: completedOrder,
         completedTasks: completedUser.totalOrders,
         milestoneReward: rewardAmount > 0n ? { task: completedUser.totalOrders, amount: rewardAmount } : null,
+        notificationIds,
       };
     });
-    response.json(jsonSafe(updated));
+    await dispatchNotificationIds(updated.notificationIds);
+    response.json(jsonSafe({
+      order: updated.order,
+      completedTasks: updated.completedTasks,
+      milestoneReward: updated.milestoneReward,
+    }));
   }),
 );
 

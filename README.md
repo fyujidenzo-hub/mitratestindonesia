@@ -13,6 +13,7 @@ The balance is an internal workflow ledger only. It is not a payment gateway, e-
 - End-to-end task lifecycle from acceptance and assignment through delivery.
 - Commission, top-up, withdrawal, reward, and audit workflows.
 - Super Admin controls plus scoped staff access for assigned customers.
+- Persistent per-account notifications with read/clear state and free standards-based Web Push for supported Android, desktop, and installed iPhone web apps.
 - Secure HttpOnly-cookie sessions, password hashing, validation, and rate limiting.
 
 ## Architecture
@@ -44,6 +45,15 @@ Neon PostgreSQL
 - Withdrawals require a PIN, a minimum of Rp100,000, sufficient balance, no active task, and no account lock. The amount is reserved immediately and refunded if Super Admin rejects it.
 - Super Admin rewards, withdrawal locks, full reporting, product catalog, bank list, and staff visibility.
 - Scoped administrators can see and manage only customers registered through their own invitation code.
+
+## Phone notifications
+
+Notification inboxes are stored in PostgreSQL and synchronized across devices. The server generates one VAPID key pair on first use and stores it in the private `PushConfiguration` table, so no paid notification provider or manual API key is required. Optional `VAPID_PUBLIC_KEY`, `VAPID_PRIVATE_KEY`, and `VAPID_SUBJECT` environment variables can override the generated keys.
+
+- Android/desktop: sign in, open the bell, and choose **Enable phone notifications**.
+- iPhone/iPad: add the site to the Home Screen, open the installed web app, then enable notifications from the bell.
+- Logging out detaches that browser endpoint from the account. A later sign-in automatically reconnects it when notification permission is still granted.
+- Browser permission, Focus/Do Not Disturb, battery settings, and free-host cold starts remain controlled by the device or hosting platform.
 
 ## Neon PostgreSQL setup
 

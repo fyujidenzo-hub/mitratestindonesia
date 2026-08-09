@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useMemo, useState } from "react";
 import { api, ApiError } from "./api";
 import type { User } from "../types";
+import { detachCurrentPushSubscription } from "./push";
 
 type SessionArea = "customer" | "admin";
 
@@ -67,6 +68,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     refresh,
     setUser,
     logout: async (area: SessionArea = currentSessionArea()) => {
+      await detachCurrentPushSubscription(area);
       if (area === "customer" && user?.role === "CUSTOMER") {
         await api("/customer/session/offline", { method: "POST" }).catch(() => undefined);
       }

@@ -76,6 +76,8 @@ model User {
   managedOrders       Order[]       @relation("AdminOrders")
   orderEvents         OrderEvent[]
   auditLogs           AuditLog[]
+  notifications       Notification[]
+  pushSubscriptions   PushSubscription[]
 
   @@index([referrerId])
   @@index([referrerId, createdAt], map: "User_referrerId_createdAt_idx")
@@ -274,4 +276,55 @@ model AuditLog {
 
   @@index([actorId, createdAt])
   @@index([entityType, entityId])
+}
+
+// A persistent per-account inbox. Read and cleared timestamps intentionally
+// remain separate: reading removes the unread badge, while clearing hides the
+// item without deleting the transaction or order that produced it.
+model Notification {
+  id          String    @id @default(cuid())
+  recipientId String
+  type        String    @db.VarChar(60)
+  title       String    @db.VarChar(180)
+  body        String    @db.VarChar(500)
+  path        String    @db.VarChar(500)
+  entityType  String?   @db.VarChar(80)
+  entityId    String?   @db.VarChar(191)
+  dedupeKey   String    @db.VarChar(255)
+  readAt      DateTime?
+  clearedAt   DateTime?
+  createdAt   DateTime  @default(now())
+
+  recipient User @relation(fields: [recipientId], references: [id], onDelete: Cascade)
+
+  @@unique([recipientId, dedupeKey])
+  @@index([recipientId, clearedAt, createdAt])
+  @@index([recipientId, readAt, clearedAt])
+}
+
+// One user can enable notifications on several phones or browsers. Endpoints
+// are globally unique so a shared device can never remain linked to two users.
+model PushSubscription {
+  id        String   @id @default(cuid())
+  userId    String
+  endpoint  String   @unique @db.VarChar(2048)
+  p256dh    String   @db.VarChar(255)
+  auth      String   @db.VarChar(255)
+  userAgent String?  @db.VarChar(500)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+// Generated once and kept in PostgreSQL so free hosts can restart without
+// invalidating every phone subscription. Environment keys override this row.
+model PushConfiguration {
+  id         String   @id @default("primary") @db.VarChar(32)
+  publicKey  String   @db.VarChar(255)
+  privateKey String   @db.VarChar(255)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
 }

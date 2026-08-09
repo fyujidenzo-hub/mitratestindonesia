@@ -22,6 +22,7 @@ const contentTypes = {
   ".webp": "image/webp",
   ".woff": "font/woff",
   ".woff2": "font/woff2",
+  ".webmanifest": "application/manifest+json; charset=utf-8",
 };
 
 function collectFiles(directory) {

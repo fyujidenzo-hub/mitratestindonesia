@@ -1,7 +1,8 @@
 import { AlertTriangle, BadgeDollarSign, Banknote, Boxes, Check, ChevronDown, ChevronLeft, ChevronRight, ClipboardList, ExternalLink, Eye, Gift, LayoutDashboard, LockKeyhole, LogOut, Menu, PackageCheck, PackagePlus, Pencil, Plus, Power, RefreshCw, Search, Send, Settings2, ShieldCheck, ShoppingBag, Trash2, UserCog, UserPlus, Users, WalletCards, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
 import { Brand } from "../components/Brand";
+import { NotificationBell } from "../components/NotificationBell";
 import { Button, Card, Field, inputClass, Notice, StatusPill } from "../components/Ui";
 import { api, apiUrl, dateTime, money } from "../lib/api";
 import { useAuth } from "../lib/auth";
@@ -38,6 +39,11 @@ const tabs: Array<{ key: Tab; label: string; icon: typeof LayoutDashboard; super
   { key: "overview", label: "Overview", icon: LayoutDashboard }, { key: "members", label: "Members", icon: Users }, { key: "tasks", label: "Tasks & Orders", icon: ClipboardList }, { key: "topups", label: "Top-up", icon: BadgeDollarSign }, { key: "withdrawals", label: "Withdrawal", icon: Banknote }, { key: "catalog", label: "Catalog", icon: Boxes, superOnly: true }, { key: "rewards", label: "Rewards", icon: Gift, superOnly: true }, { key: "settings", label: "Settings", icon: Settings2, superOnly: true }, { key: "staff", label: "Admin Team", icon: UserCog, superOnly: true },
 ];
 
+function initialAdminTab(): Tab {
+  const requested = new URLSearchParams(window.location.search).get("tab");
+  return tabs.some((item) => item.key === requested) ? requested as Tab : "overview";
+}
+
 function storageLevelForMember(level: UserLevel): UserLevel {
   if (level === "VVIP") return "VIP";
   if (level === "GOLD") return "SILVER";
@@ -45,7 +51,7 @@ function storageLevelForMember(level: UserLevel): UserLevel {
 }
 
 export default function AdminPage() {
-  const { user, logout } = useAuth(); const navigate = useNavigate();
+  const { user, logout } = useAuth(); const navigate = useNavigate(); const location = useLocation();
   const { t, language } = useI18n();
   const adminRootRef = useRef<HTMLDivElement>(null);
   const adminScopeInitializedRef = useRef(false);
@@ -56,8 +62,19 @@ export default function AdminPage() {
   const latestLiveRequestRef = useRef(0);
   const liveFingerprintRef = useRef("");
   useAdminTextTranslation(adminRootRef, language);
-  const [data, setData] = useState<AdminData | null>(null); const [liveOverview, setLiveOverview] = useState<LiveOverviewData | null>(null); const [loadedOverviewKey, setLoadedOverviewKey] = useState(""); const [tab, setTab] = useState<Tab>("overview"); const [query, setQuery] = useState(""); const [phoneQuery, setPhoneQuery] = useState(""); const [selectedAdminId, setSelectedAdminId] = useState(""); const [overviewAdminId, setOverviewAdminId] = useState(""); const [overviewPeriod, setOverviewPeriod] = useState<OverviewPeriod>("daily"); const [overviewLoading, setOverviewLoading] = useState(false); const [overviewError, setOverviewError] = useState(""); const [menuOpen, setMenuOpen] = useState(false); const [message, setMessage] = useState(""); const [tone, setTone] = useState<"success" | "error">("success"); const [refreshing, setRefreshing] = useState(false);
+  const [data, setData] = useState<AdminData | null>(null); const [liveOverview, setLiveOverview] = useState<LiveOverviewData | null>(null); const [loadedOverviewKey, setLoadedOverviewKey] = useState(""); const [tab, setTab] = useState<Tab>(initialAdminTab); const [query, setQuery] = useState(""); const [phoneQuery, setPhoneQuery] = useState(""); const [selectedAdminId, setSelectedAdminId] = useState(""); const [overviewAdminId, setOverviewAdminId] = useState(""); const [overviewPeriod, setOverviewPeriod] = useState<OverviewPeriod>("daily"); const [overviewLoading, setOverviewLoading] = useState(false); const [overviewError, setOverviewError] = useState(""); const [menuOpen, setMenuOpen] = useState(false); const [message, setMessage] = useState(""); const [tone, setTone] = useState<"success" | "error">("success"); const [refreshing, setRefreshing] = useState(false);
   const [overviewMetrics, setOverviewMetrics] = useState<OverviewMetrics | null>(null);
+  const selectTab = (nextTab: Tab) => {
+    setTab(nextTab);
+    const search = new URLSearchParams(location.search);
+    search.set("tab", nextTab);
+    search.delete("notificationId");
+    navigate({ pathname: "/admin", search: `?${search.toString()}` }, { replace: true });
+  };
+  useEffect(() => {
+    const requested = new URLSearchParams(location.search).get("tab");
+    if (tabs.some((item) => item.key === requested) && requested !== tab) setTab(requested as Tab);
+  }, [location.search, tab]);
   const load = useCallback(async (mode: "initial" | "manual" | "mutation" = "manual") => {
     const requestId = ++latestRequestRef.current;
     try {
@@ -221,8 +238,8 @@ export default function AdminPage() {
     ? <AdminScopeFilter staff={data?.staff ?? []} selectedAdminId={selectedAdminId} onChange={setSelectedAdminId} />
     : null;
 
-  return <div ref={adminRootRef} className="min-h-screen bg-transparent text-slate-900"><header className="sticky top-0 z-40 border-b border-white/70 bg-white/[.97] shadow-[0_10px_35px_rgba(124,45,18,.08)]"><div className="flex h-16 items-center gap-3 px-4 lg:px-6"><button aria-label="Open navigation" className="grid h-10 w-10 place-items-center rounded-xl bg-slate-100 lg:hidden" onClick={() => setMenuOpen(true)}><Menu /></button><Brand compact /><div className="relative ml-auto hidden w-full max-w-md md:block"><Search size={17} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" /><input value={query} onChange={(e) => setQuery(e.target.value)} className="h-10 w-full rounded-xl border border-slate-200 bg-slate-50 pl-10 pr-4 text-sm font-semibold outline-none focus:border-shopee-300" placeholder={t("Search members, orders, and transactions")} /></div><div className="ml-auto flex items-center gap-3 md:ml-0"><LanguageSwitcher compact /><div className="hidden text-right sm:block"><p className="text-sm font-black">{user?.displayName}</p><p className="text-[10px] font-black uppercase tracking-wide text-shopee-500">{user?.role.replace("_", " ")}</p></div><button aria-label={t("Sign out")} onClick={async () => { await logout("admin"); navigate("/admin"); }} className="grid h-10 w-10 place-items-center rounded-xl bg-slate-100 text-slate-600 hover:bg-rose-50 hover:text-rose-600"><LogOut size={18} /></button></div></div></header>
-    <div className="flex"><aside className={`${menuOpen ? "fixed inset-0 z-50 flex" : "hidden"} w-full bg-slate-950/50 lg:sticky lg:top-16 lg:flex lg:h-[calc(100vh-4rem)] lg:w-64 lg:bg-transparent`}><div className="h-full w-72 bg-slate-950 p-4 text-white lg:w-full"><div className="mb-5 flex items-center justify-between lg:hidden"><Brand inverse compact /><button aria-label="Close navigation" onClick={() => setMenuOpen(false)}><X /></button></div><nav className="grid gap-1.5">{visibleTabs.map(({ key, label, icon: Icon }) => <button key={key} onClick={() => { setTab(key); setMenuOpen(false); }} className={`flex items-center gap-3 rounded-2xl px-4 py-3 text-left text-sm font-black transition ${tab === key ? "bg-gradient-to-r from-shopee-500 to-orange-500 text-white shadow-lg" : "text-slate-400 hover:bg-white/5 hover:text-white"}`}><Icon size={19} />{t(label)}<ChevronRight size={15} className="ml-auto opacity-40" /></button>)}</nav><div className="mt-6 rounded-2xl border border-white/10 bg-white/5 p-4"><p className="text-[10px] font-black uppercase tracking-[.16em] text-slate-500">{t("Invitation code")}</p><p className="mt-2 text-xl font-black text-white">{user?.invitationCode || "-"}</p><p className="mt-1 text-xs font-semibold text-slate-500">Bonus {money(user?.registrationBonus ?? 0)}</p></div></div><button aria-label="Close navigation overlay" className="flex-1 lg:hidden" onClick={() => setMenuOpen(false)} /></aside>
+  return <div ref={adminRootRef} className="min-h-screen bg-transparent text-slate-900"><header className="sticky top-0 z-40 border-b border-white/70 bg-white/[.97] shadow-[0_10px_35px_rgba(124,45,18,.08)]"><div className="flex h-16 items-center gap-3 px-4 lg:px-6"><button aria-label="Open navigation" className="grid h-10 w-10 place-items-center rounded-xl bg-slate-100 lg:hidden" onClick={() => setMenuOpen(true)}><Menu /></button><Brand compact /><div className="relative ml-auto hidden w-full max-w-md md:block"><Search size={17} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" /><input value={query} onChange={(e) => setQuery(e.target.value)} className="h-10 w-full rounded-xl border border-slate-200 bg-slate-50 pl-10 pr-4 text-sm font-semibold outline-none focus:border-shopee-300" placeholder={t("Search members, orders, and transactions")} /></div><div className="ml-auto flex items-center gap-3 md:ml-0"><LanguageSwitcher compact /><NotificationBell /><div className="hidden text-right sm:block"><p className="text-sm font-black">{user?.displayName}</p><p className="text-[10px] font-black uppercase tracking-wide text-shopee-500">{user?.role.replace("_", " ")}</p></div><button aria-label={t("Sign out")} onClick={async () => { await logout("admin"); navigate("/admin"); }} className="grid h-10 w-10 place-items-center rounded-xl bg-slate-100 text-slate-600 hover:bg-rose-50 hover:text-rose-600"><LogOut size={18} /></button></div></div></header>
+    <div className="flex"><aside className={`${menuOpen ? "fixed inset-0 z-50 flex" : "hidden"} w-full bg-slate-950/50 lg:sticky lg:top-16 lg:flex lg:h-[calc(100vh-4rem)] lg:w-64 lg:bg-transparent`}><div className="h-full w-72 bg-slate-950 p-4 text-white lg:w-full"><div className="mb-5 flex items-center justify-between lg:hidden"><Brand inverse compact /><button aria-label="Close navigation" onClick={() => setMenuOpen(false)}><X /></button></div><nav className="grid gap-1.5">{visibleTabs.map(({ key, label, icon: Icon }) => <button key={key} onClick={() => { selectTab(key); setMenuOpen(false); }} className={`flex items-center gap-3 rounded-2xl px-4 py-3 text-left text-sm font-black transition ${tab === key ? "bg-gradient-to-r from-shopee-500 to-orange-500 text-white shadow-lg" : "text-slate-400 hover:bg-white/5 hover:text-white"}`}><Icon size={19} />{t(label)}<ChevronRight size={15} className="ml-auto opacity-40" /></button>)}</nav><div className="mt-6 rounded-2xl border border-white/10 bg-white/5 p-4"><p className="text-[10px] font-black uppercase tracking-[.16em] text-slate-500">{t("Invitation code")}</p><p className="mt-2 text-xl font-black text-white">{user?.invitationCode || "-"}</p><p className="mt-1 text-xs font-semibold text-slate-500">Bonus {money(user?.registrationBonus ?? 0)}</p></div></div><button aria-label="Close navigation overlay" className="flex-1 lg:hidden" onClick={() => setMenuOpen(false)} /></aside>
       <main className="min-w-0 flex-1 p-4 sm:p-6 lg:p-8"><div className="mx-auto max-w-[1680px]"><div><p className="text-xs font-black uppercase tracking-[.18em] text-shopee-500">Admin command center</p><h1 className="mt-1 text-2xl font-black tracking-tight sm:text-3xl">{t(visibleTabs.find((item) => item.key === tab)?.label ?? "Overview")}</h1></div>
         {!["members", "tasks", "topups", "withdrawals"].includes(tab) && <div className="relative mt-5 md:hidden"><Search size={17} className="absolute left-3.5 top-1/2 -translate-y-1/2 text-slate-400" /><input value={query} onChange={(e) => setQuery(e.target.value)} className={`${inputClass} pl-10`} placeholder={t("Search data")} /></div>}
         <div className="mt-4 flex items-center justify-start gap-2"><Button variant="ghost" loading={refreshing} onClick={() => { void refreshAdminData(); }}><RefreshCw size={17} /> {t("Refresh data")}</Button>{tab === "overview" && <span className="hidden items-center gap-2 rounded-full border border-emerald-100 bg-emerald-50 px-3 py-2 text-[10px] font-black uppercase tracking-wide text-emerald-700 sm:inline-flex"><span className="h-2 w-2 animate-pulse rounded-full bg-emerald-500" /> Live data</span>}</div>{message && <div className="mt-5"><Notice message={message} tone={tone} onClose={() => setMessage("")} /></div>}

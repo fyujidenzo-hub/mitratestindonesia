@@ -12,6 +12,7 @@ import {
   rewardSettingKeys,
   serializeRewardMilestones,
 } from "../lib/reward-settings.js";
+import { createNotifications, dispatchNotificationIds } from "../lib/notifications.js";
 
 const router = Router();
 const staffRoles: UserRole[] = [UserRole.SUPER_ADMIN, UserRole.ADMIN, UserRole.EMPLOYEE];
@@ -1071,7 +1072,7 @@ router.post(
     const existing = await prisma.transaction.findUnique({ where: { id: String(request.params.id) } });
     if (!existing || existing.status !== TransactionStatus.PENDING) throw new HttpError(409, "The request was already reviewed or could not be found.");
 
-    const transaction = await prisma.$transaction(async (database) => {
+    const result = await prisma.$transaction(async (database) => {
       const reviewed = await database.transaction.updateMany({
         where: { id: existing.id, status: TransactionStatus.PENDING },
         data: { status, reviewerId: request.auth!.id, reviewedAt: new Date(), creditedAt: status === TransactionStatus.APPROVED ? new Date() : undefined },
@@ -1085,9 +1086,21 @@ router.post(
         await database.user.update({ where: { id: existing.userId }, data: { balance: { increment: existing.amount } } });
       }
       await database.auditLog.create({ data: { actorId: request.auth!.id, action: `TRANSACTION_${status}`, entityType: "Transaction", entityId: existing.id, details: { requestNumber: existing.requestNumber, amount: Number(existing.amount) } } });
-      return database.transaction.findUnique({ where: { id: existing.id }, include: { user: { select: { username: true, displayName: true } } } });
+      const transaction = await database.transaction.findUnique({ where: { id: existing.id }, include: { user: { select: { username: true, displayName: true } } } });
+      const label = existing.type === TransactionType.TOPUP ? "Top-up" : "Withdrawal";
+      const notificationIds = await createNotifications(database, [existing.userId], {
+        type: "FINANCE_REVIEWED",
+        title: `${label} ${status.toLowerCase()}`,
+        body: `${existing.requestNumber} was ${status.toLowerCase()}. Open your account for details.`,
+        path: existing.type === TransactionType.TOPUP ? "/finance?tab=topup" : "/finance?tab=withdraw",
+        entityType: "Transaction",
+        entityId: existing.id,
+        dedupeKey: `transaction:${existing.id}:${status.toLowerCase()}`,
+      });
+      return { transaction, notificationIds };
     });
-    response.json(jsonSafe({ transaction }));
+    await dispatchNotificationIds(result.notificationIds);
+    response.json(jsonSafe({ transaction: result.transaction }));
   }),
 );
 
@@ -1136,9 +1149,20 @@ router.post(
       if (assignment.count !== 1) throw new HttpError(409, "This order has already been assigned.");
       await database.orderItem.createMany({ data: rows.map((row) => ({ ...row, orderId: order.id })) });
       await database.orderEvent.create({ data: { orderId: order.id, actorId: request.auth!.id, fromStatus: OrderStatus.WAITING_ASSIGNMENT, toStatus: OrderStatus.PRODUCT_ASSIGNED, note: "Product assigned by the administrator." } });
-      return database.order.findUnique({ where: { id: order.id }, include: { items: true, user: { select: { username: true, displayName: true, level: true } } } });
+      const updatedOrder = await database.order.findUnique({ where: { id: order.id }, include: { items: true, user: { select: { username: true, displayName: true, level: true } } } });
+      const notificationIds = await createNotifications(database, [order.userId], {
+        type: "PRODUCT_ASSIGNED",
+        title: "A product was assigned",
+        body: `${order.referenceNumber} is ready in your Task Orders.`,
+        path: "/orders",
+        entityType: "Order",
+        entityId: order.id,
+        dedupeKey: `order:${order.id}:product-assigned`,
+      });
+      return { updatedOrder, notificationIds };
     });
-    response.json(jsonSafe({ order: updated }));
+    await dispatchNotificationIds(updated.notificationIds);
+    response.json(jsonSafe({ order: updated.updatedOrder }));
   }),
 );
 
@@ -1165,9 +1189,19 @@ router.post(
           reviewedAt: new Date(),
         },
       });
-      return { user, transaction };
+      const notificationIds = await createNotifications(database, [user.id], {
+        type: "REWARD_CREDITED",
+        title: "Reward credited",
+        body: `${transaction.requestNumber} was added to your balance.`,
+        path: "/history",
+        entityType: "Transaction",
+        entityId: transaction.id,
+        dedupeKey: `transaction:${transaction.id}:reward-credited`,
+      });
+      return { user, transaction, notificationIds };
     });
-    response.json(jsonSafe(result));
+    await dispatchNotificationIds(result.notificationIds);
+    response.json(jsonSafe({ user: result.user, transaction: result.transaction }));
   }),
 );
 

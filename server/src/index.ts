@@ -12,6 +12,7 @@ import authRoutes from "./routes/auth.js";
 import publicRoutes from "./routes/public.js";
 import customerRoutes from "./routes/customer.js";
 import adminRoutes from "./routes/admin.js";
+import { notificationRoutes } from "./routes/notifications.js";
 import { HttpError } from "./lib/http.js";
 
 const app = express();
@@ -64,6 +65,8 @@ app.use("/api", rateLimit({ windowMs: 60_000, limit: 180, standardHeaders: "draf
 app.get("/api/health", (_request, response) => response.json({ status: "ok" }));
 app.use("/api/auth", authRoutes);
 app.use("/api/public", publicRoutes);
+app.use("/api/customer/notifications", notificationRoutes("customer"));
+app.use("/api/admin/notifications", notificationRoutes("admin"));
 app.use("/api/customer", customerRoutes);
 app.use("/api/admin", adminRoutes);
 
@@ -94,7 +97,7 @@ if (process.env.NODE_ENV === "production") {
       if (!asset || !buffer) return next();
 
       return response
-        .set("Cache-Control", "public, max-age=3600")
+        .set("Cache-Control", request.path === "/sw.js" ? "no-cache" : "public, max-age=3600")
         .type(asset.contentType)
         .send(buffer);
     });
@@ -104,6 +107,9 @@ if (process.env.NODE_ENV === "production") {
     express.static(clientDist || path.resolve(moduleDirectory, "../client"), {
       index: false,
       maxAge: "1h",
+      setHeaders: (response, filePath) => {
+        if (filePath.endsWith(`${path.sep}sw.js`)) response.setHeader("Cache-Control", "no-cache");
+      },
     }),
   );
 

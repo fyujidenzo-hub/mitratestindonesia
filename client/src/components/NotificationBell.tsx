@@ -1,67 +1,90 @@
-import { Bell, CheckCheck, Gift, PackageCheck, RefreshCw, WalletCards, X } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Bell, Check, CheckCheck, ExternalLink, RefreshCw, Smartphone, Trash2, X } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link } from "react-router-dom";
-import { api, dateTime, money } from "../lib/api";
+import { api, dateTime } from "../lib/api";
 import { useAuth } from "../lib/auth";
-import type { Order, Transaction, User } from "../types";
+import {
+  enablePushNotifications,
+  isIosWithoutHomeScreenInstall,
+  pushSupported,
+  syncGrantedPushNotifications,
+  type NotificationArea,
+} from "../lib/push";
 
-type NotificationItem = {
+export type AccountNotification = {
   id: string;
+  type: string;
   title: string;
-  description: string;
+  body: string;
+  path: string;
+  entityType?: string;
+  entityId?: string;
+  readAt?: string;
+  clearedAt?: string;
   createdAt: string;
-  to: string;
-  kind: "task" | "reward" | "finance";
 };
 
 export function NotificationBell() {
   const { user } = useAuth();
+  const area: NotificationArea = user?.role === "CUSTOMER" ? "customer" : "admin";
+  const apiBase = `/${area}/notifications`;
   const [open, setOpen] = useState(false);
-  const [orders, setOrders] = useState<Order[]>([]);
-  const [transactions, setTransactions] = useState<Transaction[]>([]);
-  const [readIds, setReadIds] = useState<Set<string>>(new Set());
+  const [filter, setFilter] = useState<"unread" | "all">("unread");
+  const [notifications, setNotifications] = useState<AccountNotification[]>([]);
+  const [unreadCount, setUnreadCount] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
+  const [pushBusy, setPushBusy] = useState(false);
+  const [pushMessage, setPushMessage] = useState("");
+  const [pushEnabled, setPushEnabled] = useState(() => pushSupported() && Notification.permission === "granted");
   const containerRef = useRef<HTMLDivElement>(null);
 
-  const storageKey = `shopee-work-notifications-read:${user?.id || "guest"}`;
-
-  const load = async (showSpinner = false) => {
+  const load = useCallback(async (showSpinner = false) => {
     if (!user) return;
     if (showSpinner) setRefreshing(true);
     try {
-      const result = await api<{ user: User; transactions: Transaction[]; orders: Order[] }>("/customer/overview");
-      setOrders(result.orders);
-      setTransactions(result.transactions);
+      const result = await api<{ notifications: AccountNotification[]; unreadCount: number }>(apiBase, {
+        cache: "no-store",
+        headers: { "Cache-Control": "no-cache" },
+      });
+      setNotifications(result.notifications);
+      setUnreadCount(result.unreadCount);
     } catch {
-      // The rest of the application already surfaces API availability errors.
+      // Authentication and global API errors are handled elsewhere in the app.
     } finally {
       if (showSpinner) setRefreshing(false);
     }
-  };
+  }, [apiBase, user?.id]);
 
   useEffect(() => {
     if (!user) return;
-    try {
-      const stored = JSON.parse(window.localStorage.getItem(storageKey) || "[]") as string[];
-      setReadIds(new Set(stored));
-    } catch {
-      setReadIds(new Set());
-    }
+    void load();
+    void syncGrantedPushNotifications(area).then(setPushEnabled).catch(() => undefined);
     const refreshWhenVisible = () => {
       if (document.visibilityState === "visible") void load();
     };
-    refreshWhenVisible();
-    const interval = window.setInterval(refreshWhenVisible, 20_000);
-    const refreshOnFocus = () => refreshWhenVisible();
-    const refreshOnVisibility = () => refreshWhenVisible();
-    window.addEventListener("focus", refreshOnFocus);
-    document.addEventListener("visibilitychange", refreshOnVisibility);
+    const interval = window.setInterval(refreshWhenVisible, 15_000);
+    window.addEventListener("focus", refreshWhenVisible);
+    document.addEventListener("visibilitychange", refreshWhenVisible);
+    const serviceWorkerMessage = () => void load();
+    navigator.serviceWorker?.addEventListener("message", serviceWorkerMessage);
     return () => {
       window.clearInterval(interval);
-      window.removeEventListener("focus", refreshOnFocus);
-      document.removeEventListener("visibilitychange", refreshOnVisibility);
+      window.removeEventListener("focus", refreshWhenVisible);
+      document.removeEventListener("visibilitychange", refreshWhenVisible);
+      navigator.serviceWorker?.removeEventListener("message", serviceWorkerMessage);
     };
-  }, [user?.id]);
+  }, [area, load, user?.id]);
+
+  useEffect(() => {
+    const notificationId = new URLSearchParams(window.location.search).get("notificationId");
+    if (!notificationId || !user) return;
+    void api(`${apiBase}/${encodeURIComponent(notificationId)}/read`, { method: "PATCH", body: JSON.stringify({}) })
+      .then(() => load())
+      .catch(() => undefined);
+    const url = new URL(window.location.href);
+    url.searchParams.delete("notificationId");
+    window.history.replaceState({}, "", `${url.pathname}${url.search}${url.hash}`);
+  }, [apiBase, load, user?.id]);
 
   useEffect(() => {
     if (!open) return;
@@ -79,65 +102,98 @@ export function NotificationBell() {
     };
   }, [open]);
 
-  const notifications = useMemo(() => buildNotifications(orders, transactions), [orders, transactions]);
-  const unreadCount = notifications.filter((item) => !readIds.has(item.id)).length;
+  const visibleNotifications = useMemo(() => filter === "unread"
+    ? notifications.filter((notification) => !notification.readAt)
+    : notifications, [filter, notifications]);
 
-  const saveReadIds = (next: Set<string>) => {
-    setReadIds(next);
-    window.localStorage.setItem(storageKey, JSON.stringify(Array.from(next).slice(-100)));
+  const markRead = async (id: string) => {
+    const notification = notifications.find((item) => item.id === id);
+    if (!notification || notification.readAt) return;
+    await api(`${apiBase}/${encodeURIComponent(id)}/read`, { method: "PATCH", body: JSON.stringify({}) });
+    setNotifications((items) => items.map((item) => item.id === id ? { ...item, readAt: new Date().toISOString() } : item));
+    setUnreadCount((count) => Math.max(0, count - 1));
   };
 
-  const markRead = (id: string) => {
-    if (readIds.has(id)) return;
-    saveReadIds(new Set([...readIds, id]));
+  const markAllRead = async () => {
+    await api(`${apiBase}/read-all`, { method: "POST", body: JSON.stringify({}) });
+    const now = new Date().toISOString();
+    setNotifications((items) => items.map((item) => item.readAt ? item : { ...item, readAt: now }));
+    setUnreadCount(0);
   };
 
-  const markAllRead = () => saveReadIds(new Set([...readIds, ...notifications.map((item) => item.id)]));
+  const clearOne = async (id: string) => {
+    const wasUnread = notifications.some((item) => item.id === id && !item.readAt);
+    await api(`${apiBase}/${encodeURIComponent(id)}`, { method: "DELETE", body: JSON.stringify({}) });
+    setNotifications((items) => items.filter((item) => item.id !== id));
+    if (wasUnread) setUnreadCount((count) => Math.max(0, count - 1));
+  };
+
+  const clearAll = async () => {
+    await api(apiBase, { method: "DELETE", body: JSON.stringify({}) });
+    setNotifications([]);
+    setUnreadCount(0);
+  };
+
+  const enablePhonePush = async () => {
+    setPushBusy(true);
+    setPushMessage("");
+    try {
+      const enabled = await enablePushNotifications(area);
+      setPushEnabled(enabled);
+      setPushMessage(enabled ? "Phone notifications enabled on this device." : "Notification permission was not granted.");
+    } catch (error) {
+      setPushMessage(error instanceof Error ? error.message : "Unable to enable phone notifications.");
+    } finally {
+      setPushBusy(false);
+    }
+  };
 
   return <div ref={containerRef} className="relative">
-    <button type="button" onClick={() => setOpen((value) => !value)} aria-label="Notifications" aria-expanded={open} className="relative grid h-10 w-10 place-items-center rounded-xl bg-slate-50 text-slate-600 transition hover:bg-shopee-50 hover:text-shopee-500">
+    <button type="button" onClick={() => { setOpen((value) => !value); if (!open) void load(); }} aria-label="Notifications" aria-expanded={open} className="relative grid h-10 w-10 place-items-center rounded-xl bg-slate-50 text-slate-600 transition hover:bg-shopee-50 hover:text-shopee-500">
       <Bell size={19} />
-      {unreadCount > 0 && <span className="absolute -right-1 -top-1 grid min-h-5 min-w-5 place-items-center rounded-full bg-shopee-500 px-1 text-[9px] font-black text-white ring-2 ring-white">{unreadCount > 9 ? "9+" : unreadCount}</span>}
+      {unreadCount > 0 && <span className="absolute -right-1 -top-1 grid min-h-5 min-w-5 place-items-center rounded-full bg-shopee-500 px-1 text-[9px] font-black text-white ring-2 ring-white">{unreadCount > 99 ? "99+" : unreadCount}</span>}
     </button>
 
-    {open && <div role="dialog" aria-label="Notifications panel" className="fixed left-3 right-3 top-[68px] z-[70] overflow-hidden rounded-3xl border border-orange-100 bg-white shadow-[0_24px_70px_rgba(15,23,42,.2)] sm:absolute sm:left-auto sm:right-0 sm:top-12 sm:w-96">
+    {open && <div role="dialog" aria-label="Notifications panel" className="fixed left-3 right-3 top-[68px] z-[70] overflow-hidden rounded-3xl border border-orange-100 bg-white text-slate-900 shadow-[0_24px_70px_rgba(15,23,42,.2)] sm:absolute sm:left-auto sm:right-0 sm:top-12 sm:w-[420px]">
       <div className="flex items-center gap-3 border-b border-orange-100 bg-gradient-to-r from-shopee-500 to-orange-500 p-4 text-white">
-        <div className="min-w-0 flex-1"><p className="text-[10px] font-black uppercase tracking-[.16em] text-white/70">Latest activity</p><h2 className="mt-1 text-lg font-black">Notifications</h2></div>
+        <div className="min-w-0 flex-1"><p className="text-[10px] font-black uppercase tracking-[.16em] text-white/70">Account inbox</p><h2 className="mt-1 text-lg font-black">Notifications</h2></div>
         <button type="button" onClick={() => load(true)} disabled={refreshing} aria-label="Refresh notifications" className="grid h-9 w-9 place-items-center rounded-xl bg-white/15 transition hover:bg-white/25 disabled:opacity-60"><RefreshCw size={17} className={refreshing ? "animate-spin" : ""} /></button>
         <button type="button" onClick={() => setOpen(false)} aria-label="Close notifications" className="grid h-9 w-9 place-items-center rounded-xl bg-white/15 transition hover:bg-white/25"><X size={18} /></button>
       </div>
 
-      <div className="flex items-center justify-between border-b border-slate-100 px-4 py-3"><p className="text-xs font-bold text-slate-500">{unreadCount ? `${unreadCount} unread` : "You're all caught up"}</p>{unreadCount > 0 && <button type="button" onClick={markAllRead} className="inline-flex items-center gap-1.5 text-xs font-black text-shopee-500"><CheckCheck size={15} /> Mark all read</button>}</div>
+      <div className="border-b border-slate-100 p-3">
+        <div className="flex items-center gap-2">
+          <div className="flex flex-1 rounded-xl bg-slate-100 p-1 text-xs font-black">
+            <button className={`flex-1 rounded-lg px-3 py-2 ${filter === "unread" ? "bg-white text-shopee-600 shadow-sm" : "text-slate-500"}`} onClick={() => setFilter("unread")}>Unread {unreadCount ? `(${unreadCount})` : ""}</button>
+            <button className={`flex-1 rounded-lg px-3 py-2 ${filter === "all" ? "bg-white text-shopee-600 shadow-sm" : "text-slate-500"}`} onClick={() => setFilter("all")}>All</button>
+          </div>
+          {unreadCount > 0 && <button type="button" onClick={() => void markAllRead()} title="Mark all read" className="grid h-10 w-10 place-items-center rounded-xl bg-orange-50 text-shopee-600"><CheckCheck size={17} /></button>}
+          {notifications.length > 0 && <button type="button" onClick={() => void clearAll()} title="Clear all" className="grid h-10 w-10 place-items-center rounded-xl bg-rose-50 text-rose-600"><Trash2 size={16} /></button>}
+        </div>
+      </div>
 
-      <div className="max-h-[min(65vh,520px)] divide-y divide-slate-100 overflow-y-auto">
-        {notifications.length ? notifications.map((item) => {
-          const unread = !readIds.has(item.id);
-          const Icon = item.kind === "task" ? PackageCheck : item.kind === "reward" ? Gift : WalletCards;
-          return <Link key={item.id} to={item.to} onClick={() => { markRead(item.id); setOpen(false); }} className={`flex gap-3 p-4 transition hover:bg-orange-50/60 ${unread ? "bg-orange-50/30" : "bg-white"}`}>
-            <span className={`grid h-11 w-11 shrink-0 place-items-center rounded-2xl ${item.kind === "reward" ? "bg-amber-50 text-amber-600" : item.kind === "task" ? "bg-shopee-50 text-shopee-500" : "bg-slate-100 text-slate-600"}`}><Icon size={19} /></span>
-            <span className="min-w-0 flex-1"><span className="flex items-center gap-2"><span className="truncate text-sm font-black text-slate-900">{item.title}</span>{unread && <span className="h-2 w-2 shrink-0 rounded-full bg-shopee-500" />}</span><span className="mt-1 block text-xs font-semibold leading-5 text-slate-500">{item.description}</span><span className="mt-1.5 block text-[10px] font-bold text-slate-400">{dateTime(item.createdAt)}</span></span>
-          </Link>;
-        }) : <div className="grid place-items-center p-10 text-center"><span className="grid h-14 w-14 place-items-center rounded-2xl bg-shopee-50 text-shopee-500"><Bell size={24} /></span><p className="mt-4 text-sm font-black text-slate-900">No notifications yet</p><p className="mt-1 text-xs font-semibold text-slate-400">Task and balance updates will appear here.</p></div>}
+      {!pushEnabled && <div className="border-b border-slate-100 bg-sky-50/70 p-3">
+        <button type="button" disabled={pushBusy || !pushSupported()} onClick={() => void enablePhonePush()} className="flex w-full items-center gap-3 rounded-2xl bg-white p-3 text-left shadow-sm ring-1 ring-sky-100 disabled:opacity-60">
+          <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-sky-100 text-sky-700"><Smartphone size={19} /></span>
+          <span className="min-w-0 flex-1"><span className="block text-xs font-black text-slate-900">{pushBusy ? "Enabling…" : "Enable phone notifications"}</span><span className="mt-0.5 block text-[10px] font-semibold leading-4 text-slate-500">{isIosWithoutHomeScreenInstall() ? "Add to Home Screen first on iPhone." : "Receive alerts even when this page is closed."}</span></span>
+          <ExternalLink size={15} className="text-slate-400" />
+        </button>
+        {pushMessage && <p className="mt-2 px-1 text-[10px] font-bold leading-4 text-sky-800">{pushMessage}</p>}
+      </div>}
+      {pushEnabled && <div className="flex items-center gap-2 border-b border-emerald-100 bg-emerald-50 px-4 py-2.5 text-[10px] font-black text-emerald-700"><Check size={14} /> Phone alerts enabled on this device</div>}
+
+      <div className="max-h-[min(62vh,520px)] divide-y divide-slate-100 overflow-y-auto">
+        {visibleNotifications.length ? visibleNotifications.map((item) => {
+          const unread = !item.readAt;
+          return <div key={item.id} className={`group relative flex gap-3 p-4 pr-12 transition hover:bg-orange-50/60 ${unread ? "bg-orange-50/30" : "bg-white"}`}>
+            <Link to={item.path} onClick={() => { void markRead(item.id); setOpen(false); }} className="flex min-w-0 flex-1 gap-3">
+              <span className={`mt-1 h-2.5 w-2.5 shrink-0 rounded-full ${unread ? "bg-shopee-500" : "bg-slate-200"}`} />
+              <span className="min-w-0 flex-1"><span className="block text-sm font-black text-slate-900">{item.title}</span><span className="mt-1 block text-xs font-semibold leading-5 text-slate-500">{item.body}</span><span className="mt-1.5 block text-[10px] font-bold text-slate-400">{dateTime(item.createdAt)}</span></span>
+            </Link>
+            <button type="button" onClick={() => void clearOne(item.id)} title="Clear notification" aria-label={`Clear ${item.title}`} className="absolute right-3 top-3 grid h-8 w-8 place-items-center rounded-lg text-slate-300 opacity-100 transition hover:bg-rose-50 hover:text-rose-600 sm:opacity-0 sm:group-hover:opacity-100"><X size={15} /></button>
+          </div>;
+        }) : <div className="grid place-items-center p-10 text-center"><span className="grid h-14 w-14 place-items-center rounded-2xl bg-shopee-50 text-shopee-500"><Bell size={24} /></span><p className="mt-4 text-sm font-black text-slate-900">{filter === "unread" ? "No unread notifications" : "No notifications yet"}</p><p className="mt-1 text-xs font-semibold text-slate-400">You’re all caught up.</p></div>}
       </div>
     </div>}
   </div>;
-}
-
-function buildNotifications(orders: Order[], transactions: Transaction[]): NotificationItem[] {
-  const orderItems = orders.map((order): NotificationItem => {
-    const productName = order.items[0]?.productName;
-    if (order.status === "DELIVERED") return { id: `order:${order.id}:delivered`, title: "Task completed", description: `${productName || "Your task"} was completed. Commission ${money(order.commission)} was credited.`, createdAt: order.completedAt || order.createdAt, to: "/orders", kind: "task" };
-    if (["PRODUCT_ASSIGNED", "WAITING_SHIPMENT", "PENDING_DELIVERY"].includes(order.status)) return { id: `order:${order.id}:assigned`, title: "Product assigned", description: `${productName || "A product"} is ready in your Task Orders.`, createdAt: order.assignedAt || order.createdAt, to: "/orders", kind: "task" };
-    return { id: `order:${order.id}:waiting`, title: "Order task received", description: "Your request was received and is waiting for product assignment.", createdAt: order.createdAt, to: "/orders", kind: "task" };
-  });
-
-  const transactionItems = transactions.map((transaction): NotificationItem => {
-    if (transaction.type === "REWARD") return { id: `transaction:${transaction.id}:${transaction.status}`, title: "Reward credited", description: `${transaction.description || transaction.senderName || "Task milestone reward"}: +${money(transaction.amount)}`, createdAt: transaction.createdAt, to: "/history", kind: "reward" };
-    const label = transaction.type === "TOPUP" ? "Top-up" : "Withdrawal";
-    return { id: `transaction:${transaction.id}:${transaction.status}`, title: `${label} ${transaction.status.toLowerCase()}`, description: `${money(transaction.amount)} · ${transaction.requestNumber}`, createdAt: transaction.createdAt, to: transaction.type === "TOPUP" ? "/finance?tab=topup" : "/finance?tab=withdraw", kind: "finance" };
-  });
-
-  return [...orderItems, ...transactionItems]
-    .sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime())
-    .slice(0, 15);
 }
