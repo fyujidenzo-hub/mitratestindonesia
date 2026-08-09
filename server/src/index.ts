@@ -1,5 +1,5 @@
 import "dotenv/config";
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import express from "express";
@@ -40,6 +40,14 @@ function embeddedClientBuffer(publicPath: string) {
   const buffer = Buffer.from(asset.content, "base64");
   embeddedClientBuffers.set(publicPath, buffer);
   return buffer;
+}
+
+function indexForPath(indexBuffer: Buffer, requestPath: string) {
+  if (requestPath !== "/admin" && !requestPath.startsWith("/admin/")) return indexBuffer;
+
+  return indexBuffer.toString("utf8")
+    .replace('href="/manifest.webmanifest"', 'href="/admin-manifest.webmanifest"')
+    .replace('content="Shopee Work"', 'content="Shopee Work Admin"');
 }
 
 app.set("trust proxy", 1);
@@ -83,6 +91,7 @@ if (process.env.NODE_ENV === "production") {
   const clientDist = clientDistCandidates.find((candidate) =>
     existsSync(path.join(candidate, "index.html")),
   );
+  const diskIndexBuffer = clientDist ? readFileSync(path.join(clientDist, "index.html")) : null;
 
   if (!clientDist && !hasEmbeddedClient) {
     console.error("Client build not found. Checked:", clientDistCandidates);
@@ -113,22 +122,23 @@ if (process.env.NODE_ENV === "production") {
     }),
   );
 
-  app.use((_request, response, next) => {
+  app.use((request, response, next) => {
     const embeddedIndex = embeddedClientAssets["/index.html"];
     const embeddedIndexBuffer = embeddedClientBuffer("/index.html");
     if (embeddedIndex && embeddedIndexBuffer) {
       return response
         .set("Cache-Control", "no-cache")
         .type(embeddedIndex.contentType)
-        .send(embeddedIndexBuffer);
+        .send(indexForPath(embeddedIndexBuffer, request.path));
     }
 
-    if (!clientDist) {
+    if (!diskIndexBuffer) {
       return next(new Error("The client application was not included in the production build."));
     }
     return response
       .set("Cache-Control", "no-cache")
-      .sendFile(path.join(clientDist, "index.html"));
+      .type("html")
+      .send(indexForPath(diskIndexBuffer, request.path));
   });
 }
 

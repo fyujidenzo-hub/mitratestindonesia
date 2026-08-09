@@ -1,0 +1,19 @@
+{
+  "id": "/admin",
+  "name": "Shopee Work Admin",
+  "short_name": "SW Admin",
+  "description": "Administration, finance review, task, and account notification portal.",
+  "start_url": "/admin",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#fff8f4",
+  "theme_color": "#ee4d2d",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
